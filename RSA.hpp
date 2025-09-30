@@ -92,11 +92,11 @@ namespace RSA {
     
     // Generate RSA key pair
     KeyPair generateKeyPair() {
-        // Generate two distinct primes
-        long long p = generatePrime(100, 1000);
+        // Generate two distinct primes with larger range
+        long long p = generatePrime(1000, 10000);
         long long q;
         do {
-            q = generatePrime(100, 1000);
+            q = generatePrime(1000, 10000);
         } while (q == p);
         
         // Calculate n = p * q

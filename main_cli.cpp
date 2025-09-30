@@ -46,6 +46,7 @@ int main() {
             std::cout << "Enter modulus (n): ";
             std::cin >> keyPair.modulus;
             
+            std::cin.ignore(); // 清除输入缓冲区中的换行符
             hasKeyPair = true;
             std::cout << "Key pair has been set." << std::endl;
             break;
@@ -64,13 +65,21 @@ int main() {
                 break;
             }
             
-            std::cin.ignore(); // Clear previous input
             std::cout << "Enter text to encrypt: ";
             std::string plaintext;
             std::getline(std::cin, plaintext);
             
+            std::cout << "Text to encrypt: \"" << plaintext << "\" (length: " << plaintext.length() << ")" << std::endl;
+            
             try {
                 std::vector<long long> encrypted = RSA::encryptText(plaintext, keyPair);
+                std::cout << "Encrypted numbers: ";
+                for (size_t i = 0; i < encrypted.size(); ++i) {
+                    std::cout << encrypted[i];
+                    if (i < encrypted.size() - 1) std::cout << ", ";
+                }
+                std::cout << std::endl;
+                
                 result = RSA::ciphertextToString(encrypted);
                 std::cout << "Encrypted text: " << result << std::endl;
             } catch (const std::exception& e) {
@@ -84,15 +93,23 @@ int main() {
                 break;
             }
             
-            std::cin.ignore(); // Clear previous input
             std::cout << "Enter text to decrypt: ";
-            std::string ciphertext;
-            std::getline(std::cin, ciphertext);
+            std::string ciphertextInput;
+            std::getline(std::cin, ciphertextInput);
+            
+            std::cout << "Text to decrypt: \"" << ciphertextInput << "\"" << std::endl;
             
             try {
-                std::vector<long long> encrypted = RSA::stringToCiphertext(ciphertext);
-                result = RSA::decryptText(encrypted, keyPair);
-                std::cout << "Decrypted text: " << result << std::endl;
+                std::vector<long long> encrypted = RSA::stringToCiphertext(ciphertextInput);
+                std::cout << "Numbers to decrypt: ";
+                for (size_t i = 0; i < encrypted.size(); ++i) {
+                    std::cout << encrypted[i];
+                    if (i < encrypted.size() - 1) std::cout << ", ";
+                }
+                std::cout << std::endl;
+                
+                std::string decrypted = RSA::decryptText(encrypted, keyPair);
+                std::cout << "Decrypted text: \"" << decrypted << "\"" << std::endl;
             } catch (const std::exception& e) {
                 std::cout << "Decryption failed: " << e.what() << std::endl;
             }
