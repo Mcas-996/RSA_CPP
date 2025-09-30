@@ -8,11 +8,11 @@
 
 namespace RSA {
     
-    // RSA Key Pair structure
+    // RSA Key Pair structure using strings for keys
     struct KeyPair {
-        long long publicKey;    // Public key e
-        long long privateKey;   // Private key d
-        long long modulus;      // Modulus n
+        std::string publicKey;    // Public key e as string
+        std::string privateKey;   // Private key d as string
+        std::string modulus;      // Modulus n as string
     };
     
     // Calculate Greatest Common Divisor
@@ -47,16 +47,36 @@ namespace RSA {
         return (x % m + m) % m;
     }
     
-    // Fast modular exponentiation
-    long long modPow(long long base, long long exp, long long mod) {
-        long long result = 1;
-        base = base % mod;
-        while (exp > 0) {
-            if (exp % 2 == 1) {
-                result = (result * base) % mod;
+    // Safe modular multiplication to prevent overflow
+    long long modMul(long long a, long long b, long long mod) {
+        // Handle negative numbers
+        a = (a % mod + mod) % mod;
+        b = (b % mod + mod) % mod;
+        
+        long long result = 0;
+        while (b > 0) {
+            if (b & 1) {
+                result = (result + a) % mod;
             }
-            exp = exp >> 1;
-            base = (base * base) % mod;
+            a = (a << 1) % mod;  // a = (a * 2) % mod
+            b >>= 1;
+        }
+        return result;
+    }
+    
+    // Fast modular exponentiation with overflow protection
+    long long modPow(long long base, long long exp, long long mod) {
+        if (mod == 1) return 0;
+        
+        long long result = 1;
+        base = (base % mod + mod) % mod;  // Ensure base is positive
+        
+        while (exp > 0) {
+            if (exp & 1) {
+                result = modMul(result, base, mod);
+            }
+            exp >>= 1;
+            base = modMul(base, base, mod);
         }
         return result;
     }
@@ -75,11 +95,13 @@ namespace RSA {
         return true;
     }
     
-    // Generate random prime in specified range
-    long long generatePrime(long long min, long long max) {
+    // Generate random prime in safe range (1e5 to 1e6-1) to avoid overflow
+    long long generatePrime() {
         std::random_device rd;
         std::mt19937 gen(rd());
-        std::uniform_int_distribution<long long> dis(min, max);
+        // Generate primes in range 100000 to 999999 (6 digits)
+        // This ensures p * q < 1e12, well within long long range (9e18)
+        std::uniform_int_distribution<long long> dis(100000LL, 999999LL);
         
         long long candidate;
         do {
@@ -92,11 +114,11 @@ namespace RSA {
     
     // Generate RSA key pair
     KeyPair generateKeyPair() {
-        // Generate two distinct primes
-        long long p = generatePrime(100, 1000);
+        // Generate two distinct primes with larger range
+        long long p = generatePrime();
         long long q;
         do {
-            q = generatePrime(100, 1000);
+            q = generatePrime();
         } while (q == p);
         
         // Calculate n = p * q
@@ -118,17 +140,27 @@ namespace RSA {
         // Calculate private exponent d
         long long d = modInverse(e, phi);
         
-        return {e, d, n};
+        // Convert to strings
+        return {std::to_string(e), std::to_string(d), std::to_string(n)};
     }
     
     // RSA encrypt single number
-    long long encryptNumber(long long message, long long publicKey, long long modulus) {
-        return modPow(message, publicKey, modulus);
+    long long encryptNumber(long long message, const std::string& publicKey, const std::string& modulus) {
+        long long e = std::stoll(publicKey);
+        long long n = std::stoll(modulus);
+        return modPow(message, e, n);
     }
     
     // RSA decrypt single number
-    long long decryptNumber(long long ciphertext, long long privateKey, long long modulus) {
-        return modPow(ciphertext, privateKey, modulus);
+    long long decryptNumber(long long ciphertext, const std::string& privateKey, const std::string& modulus) {
+        long long d = std::stoll(privateKey);
+        long long n = std::stoll(modulus);
+        long long result = modPow(ciphertext, d, n);
+        // Handle negative results
+        if (result < 0) {
+            result += n;
+        }
+        return result;
     }
     
     // Encrypt text
@@ -140,7 +172,8 @@ namespace RSA {
             long long charValue = static_cast<long long>(static_cast<unsigned char>(c));
             
             // Ensure character value is less than modulus
-            if (charValue >= keyPair.modulus) {
+            long long n = std::stoll(keyPair.modulus);
+            if (charValue >= n) {
                 throw std::runtime_error("Character value too large for modulus");
             }
             
@@ -161,7 +194,7 @@ namespace RSA {
             long long decrypted = decryptNumber(encrypted, keyPair.privateKey, keyPair.modulus);
             
             // Convert number back to character
-            char c = static_cast<char>(decrypted);
+            char c = static_cast<char>(decrypted);  // No mask needed anymore
             plaintext += c;
         }
         

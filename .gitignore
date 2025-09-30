@@ -1,1 +1,5 @@
 m
+build
+test_rsa.cpp
+test_cli_auto.cpp
+debug_primes.cpp

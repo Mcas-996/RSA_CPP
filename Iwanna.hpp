@@ -56,13 +56,12 @@ namespace Myspace {
 
         // Add conversion button (optional, more secure)
         if (Button("Process Keys")) {
-            long long puk = 0, prk = 0, modn = 0;
+            std::string puk = "", prk = "", modn = "";
 
             // Convert public key
             if (strlen(public_key_buffer) > 0) {
                 try {
-                    std::string pub_str = public_key_buffer;
-                    puk = std::stoll(pub_str);
+                    puk = std::string(public_key_buffer);
                 }
                 catch (const std::exception& e) {
                     TextColored(ImVec4(1.0f, 0.0f, 0.0f, 1.0f), "Invalid Public Key!");
@@ -72,8 +71,7 @@ namespace Myspace {
             // Convert private key
             if (strlen(private_key_buffer) > 0) {
                 try {
-                    std::string priv_str = private_key_buffer;
-                    prk = std::stoll(priv_str);
+                    prk = std::string(private_key_buffer);
                 }
                 catch (const std::exception& e) {
                     TextColored(ImVec4(1.0f, 0.0f, 0.0f, 1.0f), "Invalid Private Key!");
@@ -83,8 +81,7 @@ namespace Myspace {
             // Convert modulus
             if (strlen(mod_number_buffer) > 0) {
                 try {
-                    std::string mod_str = mod_number_buffer;
-                    modn = std::stoll(mod_str);
+                    modn = std::string(mod_number_buffer);
                 }
                 catch (const std::exception& e) {
                     TextColored(ImVec4(1.0f, 0.0f, 0.0f, 1.0f), "Invalid Mod Number!");
@@ -92,9 +89,9 @@ namespace Myspace {
             }
 
             // Display results
-            Text("Public Key: %lld", puk);
-            Text("Private Key: %lld", prk);
-            Text("Mod Number: %lld", modn);
+            Text("Public Key: %s", puk.c_str());
+            Text("Private Key: %s", prk.c_str());
+            Text("Mod Number: %s", modn.c_str());
 
             // Output to console (optional)
             std::cout << "Public Key: " << puk << " Private Key: " << prk << " Modulus: " << modn << std::endl;
@@ -115,23 +112,20 @@ namespace Myspace {
 
     void Show_KP_window() {
         ImGui::Begin("Key");
-        // Numeric variables
-         long long public_key = 
-            KP.publicKey;
-        long long private_key = 
-            KP.privateKey;
-        long long mod_number = 
-            KP.modulus;
+        // String variables
+        std::string public_key = KP.publicKey;
+        std::string private_key = KP.privateKey;
+        std::string mod_number = KP.modulus;
 
         // Corresponding character buffers
-        static char public_key_str[32] = "";
-        static char private_key_str[32] = "";
-        static char mod_number_str[32] = "";
+        static char public_key_str[128] = "";
+        static char private_key_str[128] = "";
+        static char mod_number_str[128] = "";
 
-        // Convert numbers to strings
-        snprintf(public_key_str, sizeof(public_key_str), "%lld", public_key);
-        snprintf(private_key_str, sizeof(private_key_str), "%lld", private_key);
-        snprintf(mod_number_str, sizeof(mod_number_str), "%lld", mod_number);
+        // Convert strings to character arrays
+        snprintf(public_key_str, sizeof(public_key_str), "%s", public_key.c_str());
+        snprintf(private_key_str, sizeof(private_key_str), "%s", private_key.c_str());
+        snprintf(mod_number_str, sizeof(mod_number_str), "%s", mod_number.c_str());
 
         // Display using read-only input fields
         ImGui::Text("Public Key:");

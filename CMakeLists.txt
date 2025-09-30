@@ -50,3 +50,33 @@ endif()
 target_include_directories(RSA_CLI PRIVATE
     ${CMAKE_SOURCE_DIR}
 )
+
+# 添加测试可执行文件
+add_executable(test_rsa
+    test_rsa.cpp
+    RSA.hpp
+)
+
+target_include_directories(test_rsa PRIVATE
+    ${CMAKE_SOURCE_DIR}
+)
+
+# 添加调试可执行文件
+add_executable(debug_primes
+    debug_primes.cpp
+    RSA.hpp
+)
+
+target_include_directories(debug_primes PRIVATE
+    ${CMAKE_SOURCE_DIR}
+)
+
+# 添加CLI自动化测试
+add_executable(test_cli_auto
+    test_cli_auto.cpp
+    RSA.hpp
+)
+
+target_include_directories(test_cli_auto PRIVATE
+    ${CMAKE_SOURCE_DIR}
+)
