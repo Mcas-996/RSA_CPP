@@ -46,6 +46,7 @@ int main() {
             std::cout << "Enter modulus (n): ";
             std::getline(std::cin, keyPair.modulus);
             
+            std::cin.ignore(); // 清除输入缓冲区中的换行符
             hasKeyPair = true;
             std::cout << "Key pair has been set." << std::endl;
             break;
