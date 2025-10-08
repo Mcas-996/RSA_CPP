@@ -46,13 +46,13 @@ namespace Myspace {
         // Display prompt text first
         Text("Enter Public Key:");
         // Add label to input field, using different buffers
-        InputText("##PublicKey", public_key_buffer, IM_ARRAYSIZE(public_key_buffer));
+        InputTextMultiline("##public_key", public_key_buffer, IM_ARRAYSIZE(public_key_buffer), ImVec2(-FLT_MIN, ImGui::GetTextLineHeight() * 3));
 
         Text("Enter Private Key:");
-        InputText("##PrivateKey", private_key_buffer, IM_ARRAYSIZE(private_key_buffer));
+        InputTextMultiline("##PrivateKey", private_key_buffer, IM_ARRAYSIZE(private_key_buffer), ImVec2(-FLT_MIN, ImGui::GetTextLineHeight() * 3));
 
         Text("Enter Mod Number:");
-        InputText("##ModNumber", mod_number_buffer, IM_ARRAYSIZE(mod_number_buffer));
+        InputTextMultiline("##ModNumber", mod_number_buffer, IM_ARRAYSIZE(mod_number_buffer), ImVec2(-FLT_MIN, ImGui::GetTextLineHeight() * 3));
 
         // Add conversion button (optional, more secure)
         if (Button("Process Keys")) {
@@ -129,18 +129,21 @@ namespace Myspace {
 
         // Display using read-only input fields
         ImGui::Text("Public Key:");
-        ImGui::InputText("##PublicKeyDisplay", 
+        ImGui::InputTextMultiline("##PublicKeyDisplay",
             public_key_str, sizeof(public_key_str),
+            ImVec2(-FLT_MIN, ImGui::GetTextLineHeight() * 5),
             ImGuiInputTextFlags_ReadOnly);
 
         ImGui::Text("Private Key:");
-        ImGui::InputText("##PrivateKeyDisplay", 
+        ImGui::InputTextMultiline("##PrivateKeyDisplay",
             private_key_str, sizeof(private_key_str),
+            ImVec2(-FLT_MIN, ImGui::GetTextLineHeight() * 5),
             ImGuiInputTextFlags_ReadOnly);
 
         ImGui::Text("Mod Number:");
-        ImGui::InputText("##ModNumberDisplay", 
+        ImGui::InputTextMultiline("##ModNumberDisplay",
             mod_number_str, sizeof(mod_number_str),
+            ImVec2(-FLT_MIN, ImGui::GetTextLineHeight() * 5),
             ImGuiInputTextFlags_ReadOnly);
 
         ImGui::End();
@@ -151,7 +154,7 @@ namespace Myspace {
         Begin("encrypt");
         static char buffer[4096];
         Text("text:");
-        InputText("", buffer, sizeof(buffer));
+        InputTextMultiline("##text_input", buffer, sizeof(buffer), ImVec2(-FLT_MIN, ImGui::GetTextLineHeight() * 8));
         std::string s(buffer);
         Text("length: %s\n", std::to_string(s.size()).c_str());
         if (Button("encrypt")) {
@@ -169,7 +172,7 @@ namespace Myspace {
         Begin("descrypt");
         static char buffer[4096];
         Text("text:");
-        InputText("", buffer, sizeof(buffer));
+        InputTextMultiline("##decrypt_text", buffer, sizeof(buffer), ImVec2(-FLT_MIN, ImGui::GetTextLineHeight() * 8));
         std::string s(buffer);
         Text("length: %s\n", std::to_string(s.size()).c_str());
         if (Button("decrypt")) {
@@ -185,9 +188,10 @@ namespace Myspace {
         Begin("result");
         static char result_buffer[2048] = "";
         snprintf(result_buffer, sizeof(result_buffer), "%s", result.c_str());
-        InputText("##ResultDisplay", 
-                         result_buffer, 
+        InputTextMultiline("##ResultDisplay",
+                         result_buffer,
                          sizeof(result_buffer),
+                         ImVec2(-FLT_MIN, ImGui::GetTextLineHeight() * 12),
                          ImGuiInputTextFlags_ReadOnly);
         End();
     }

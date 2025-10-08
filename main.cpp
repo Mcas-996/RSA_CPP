@@ -1,30 +1,49 @@
 #include "prepare.hpp"
 #include "Iwanna.hpp"
 #include <cstdlib>
+#include <iostream>
+
+#if defined(_WIN32)
+#include <windows.h>
+extern LRESULT WINAPI WndProc(HWND hWnd, UINT msg, WPARAM wParam, LPARAM lParam);
+#endif
+
 int main() {
     //std::cout << "Application starting..." << std::endl;
 
-    // 1. Create window (simplified)
-    WNDCLASSEX wc = { sizeof(wc), CS_CLASSDC, WndProc, 0L, 0L, GetModuleHandle(NULL), NULL, NULL, NULL, NULL, _T("ImGui"), NULL };
-    RegisterClassEx(&wc);
-    HWND hwnd = CreateWindowEx(0, wc.lpszClassName, _T("ImGui Example"), WS_OVERLAPPEDWINDOW, 100, 100, 1280, 800, NULL, NULL, wc.hInstance, NULL);
+#if !defined(_WIN32) && defined(NO_GLFW)
+    std::cerr << "Error: GLFW library not found. Cannot run GUI on Linux without GLFW." << std::endl;
+    std::cerr << "Please install GLFW3 development libraries: sudo apt install libglfw3-dev" << std::endl;
+    return 1;
+#endif
 
-    // 2. Initialize D3D (assuming CreateDeviceD3D internally handles render target creation)
-    if (!CreateDeviceD3D(hwnd)) return 1; // Simplified error handling
+    // 1. Create window and initialize graphics
+    if (!InitializeWindowAndGraphics(1280, 800, "RSA_CPP GUI")) return 1;
 
-    ShowWindow(hwnd, SW_SHOWDEFAULT); UpdateWindow(hwnd);
-
-    // 3. Initialize ImGui
+    // 2. Initialize ImGui
     IMGUI_CHECKVERSION(); ImGui::CreateContext(); ImGui::StyleColorsDark();
-    ImGui_ImplWin32_Init(hwnd); ImGui_ImplDX11_Init(g_pd3dDevice, g_pd3dDeviceContext);
-    // Add before main loop
-    ImVec4 bg = ImVec4(0.45f, 0.55f, 0.60f, 1.00f);
+
+#if defined(_WIN32)
+    extern HWND g_hwnd;
+    extern ID3D11Device* g_pd3dDevice;
+    extern ID3D11DeviceContext* g_pd3dDeviceContext;
+    ImGui_ImplWin32_Init(g_hwnd); ImGui_ImplDX11_Init(g_pd3dDevice, g_pd3dDeviceContext);
+#else
+#if defined(HAS_GLFW)
+    extern GLFWwindow* g_window;
+    ImGui_ImplGlfw_InitForOpenGL(g_window, true);
+    ImGui_ImplOpenGL3_Init("#version 130");
+#endif
+#endif
+
     //std::cout << "Initialization complete, entering main loop..." << std::endl;
 
     // 4. Main loop
+    int frameCount = 0; // For debugging
+
+#if defined(_WIN32)
     MSG msg = {};
     ZeroMemory(&msg, sizeof(msg));
-    int frameCount = 0; // For debugging
 
     while (msg.message != WM_QUIT) {
         frameCount++;
@@ -37,10 +56,25 @@ int main() {
             ::TranslateMessage(&msg);
             ::DispatchMessage(&msg);
         }
+#else
+    while (true) {  // For Linux, we handle loop exit differently
+        frameCount++;
+        //if (frameCount % 60 == 0) { // Output every 60 frames
+        //    std::cout << "Ran " << frameCount << " frames" << std::endl;
+        //}
+
+#if defined(HAS_GLFW)
+        extern GLFWwindow* g_window;
+        if (glfwWindowShouldClose(g_window))
+            break;
+
+        // Poll and handle events (inputs, window resize, etc.)
+        glfwPollEvents();
+#endif
+#endif
 
         // Always execute rendering (this is key!)
-        ImGui_ImplDX11_NewFrame();
-        ImGui_ImplWin32_NewFrame();
+        NewFrame();
         ImGui::NewFrame();
 
         ImGui::ShowDemoWindow();
@@ -50,16 +84,24 @@ int main() {
         Myspace::enpt();
         Myspace::dept();
         Myspace::show_res();
-        ImGui::Render();
 
-        g_pd3dDeviceContext->OMSetRenderTargets(1, &g_mainRenderTargetView, NULL);
-        g_pd3dDeviceContext->ClearRenderTargetView(g_mainRenderTargetView, (float*)&bg);
-        ImGui_ImplDX11_RenderDrawData(ImGui::GetDrawData());
-        g_pSwapChain->Present(1, 0);
+        Render();
     }
 
     // 5. Cleanup
-    ImGui_ImplDX11_Shutdown(); ImGui_ImplWin32_Shutdown(); ImGui::DestroyContext();
-    CleanupDeviceD3D(); DestroyWindow(hwnd); UnregisterClass(wc.lpszClassName, wc.hInstance); // [[5]]
+#if defined(_WIN32)
+    ImGui_ImplDX11_Shutdown(); ImGui_ImplWin32_Shutdown();
+#else
+#if defined(HAS_GLFW)
+    ImGui_ImplOpenGL3_Shutdown();
+    ImGui_ImplGlfw_Shutdown();
+#endif
+#endif
+    ImGui::DestroyContext();
+    CleanupGraphicsAndWindow();
+#if defined(_WIN32)
     return (int)msg.wParam;
+#else
+    return 0;
+#endif
 }
