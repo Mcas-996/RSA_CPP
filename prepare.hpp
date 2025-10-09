@@ -31,11 +31,18 @@ void CreateRenderTarget();
 void CleanupRenderTarget();
 LRESULT WINAPI WndProc(HWND hWnd, UINT msg, WPARAM wParam, LPARAM lParam);
 #elif defined(HAS_GLFW)
+#if defined(__APPLE__)
+#include <OpenGL/gl3.h>
+#endif
 #include <GLFW/glfw3.h>
 #include "ImGui/imgui_impl_glfw.h"
 #include "ImGui/imgui_impl_opengl3.h"
-// Linux specific global variables
+// Linux/macOS specific global variables
 extern GLFWwindow* g_window;
+#endif
+
+#if defined(HAS_GLFW)
+const char* GetOpenGLGLSLVersion();
 #endif
 
 // Cross-platform function declarations
