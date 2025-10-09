@@ -118,11 +118,23 @@ namespace Myspace {
 
     RSA::KeyPair KP;
     std::string result;
+    // Compute a 50% screen workspace anchored near the top-left and helper to place windows proportionally
+    static inline void SetWindowPosSizeRatio(const char* /*name*/, ImVec2 rel_pos, ImVec2 rel_size)
+    {
+        ImVec2 disp = ImGui::GetIO().DisplaySize;
+        const float scale = 0.5f; // target overall area ~50%
+        ImVec2 work_size = ImVec2(disp.x * scale, disp.y * scale);
+        const ImVec2 margin(20.0f, 40.0f); // anchor near top-left with a small padding
+        ImVec2 work_origin = margin;
+        ImVec2 pos = ImVec2(work_origin.x + work_size.x * rel_pos.x, work_origin.y + work_size.y * rel_pos.y);
+        ImVec2 size = ImVec2(work_size.x * rel_size.x, work_size.y * rel_size.y);
+        ImGui::SetNextWindowPos(pos, ImGuiCond_FirstUseEver);
+        ImGui::SetNextWindowSize(size, ImGuiCond_FirstUseEver);
+    }
+
     void input_KP_window() {
         using namespace ImGui;
-        // Set default position/size only on first use (honors imgui.ini if present)
-        ImGui::SetNextWindowPos(ImVec2(30, 60), ImGuiCond_FirstUseEver);
-        ImGui::SetNextWindowSize(ImVec2(420, 260), ImGuiCond_FirstUseEver);
+        SetWindowPosSizeRatio("RSA", ImVec2(0.01f, 0.01f), ImVec2(0.40f, 0.32f));
         Begin("RSA");
 
         // Create separate buffers for each input field
@@ -209,8 +221,7 @@ namespace Myspace {
     }
 
     void Generate_KP_window() {
-        ImGui::SetNextWindowPos(ImVec2(30, 340), ImGuiCond_FirstUseEver);
-        ImGui::SetNextWindowSize(ImVec2(260, 90), ImGuiCond_FirstUseEver);
+        SetWindowPosSizeRatio("Generate", ImVec2(0.01f, 0.34f), ImVec2(0.25f, 0.14f));
         ImGui::Begin("Generate");
         if (ImGui::Button("generate a new key")) {
             KP = RSA::generateKeyPair();
@@ -219,8 +230,7 @@ namespace Myspace {
     }
 
     void Show_KP_window() {
-        ImGui::SetNextWindowPos(ImVec2(30, 440), ImGuiCond_FirstUseEver);
-        ImGui::SetNextWindowSize(ImVec2(520, 360), ImGuiCond_FirstUseEver);
+        SetWindowPosSizeRatio("Key", ImVec2(0.01f, 0.50f), ImVec2(0.45f, 0.40f));
         ImGui::Begin("Key");
         // String variables
         std::string public_key = KP.publicKey;
@@ -265,8 +275,7 @@ namespace Myspace {
 
     void enpt() {
         using namespace ImGui;
-        ImGui::SetNextWindowPos(ImVec2(560, 60), ImGuiCond_FirstUseEver);
-        ImGui::SetNextWindowSize(ImVec2(520, 280), ImGuiCond_FirstUseEver);
+        SetWindowPosSizeRatio("encrypt", ImVec2(0.47f, 0.01f), ImVec2(0.48f, 0.30f));
         Begin("encrypt");
         static char buffer[4096];
         Text("text:");
@@ -289,8 +298,7 @@ namespace Myspace {
     }
     void dept() {
         using namespace ImGui;
-        ImGui::SetNextWindowPos(ImVec2(560, 360), ImGuiCond_FirstUseEver);
-        ImGui::SetNextWindowSize(ImVec2(520, 280), ImGuiCond_FirstUseEver);
+        SetWindowPosSizeRatio("descrypt", ImVec2(0.47f, 0.32f), ImVec2(0.48f, 0.30f));
         Begin("descrypt");
         static char buffer[4096];
         static detail::AutoWrapUserData cipher_wrap{ 64, true };
@@ -314,8 +322,7 @@ namespace Myspace {
     }
     void show_res() {
         using namespace ImGui;
-        ImGui::SetNextWindowPos(ImVec2(560, 660), ImGuiCond_FirstUseEver);
-        ImGui::SetNextWindowSize(ImVec2(520, 280), ImGuiCond_FirstUseEver);
+        SetWindowPosSizeRatio("result", ImVec2(0.47f, 0.63f), ImVec2(0.48f, 0.34f));
         Begin("result");
         static char result_buffer[4096] = "";
         const std::string wrapped_result = detail::wrapForDisplay(result, 64, true);
