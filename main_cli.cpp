@@ -1,4 +1,5 @@
 #include "RSA.hpp"
+#include "bin.hpp"
 #include "third_party/cppcodec/cppcodec/base64_rfc4648.hpp"
 #include <cctype>
 #include <cstdint>
@@ -85,8 +86,12 @@ int main() {
         std::cout << "3. Show current key pair" << std::endl;
         std::cout << "4. Encrypt text" << std::endl;
         std::cout << "5. Decrypt text" << std::endl;
-        std::cout << "6. Exit" << std::endl;
-        std::cout << "Choose an option (1-6): ";
+        std::cout << "6. Save string to binary file" << std::endl;
+        std::cout << "7. Encrypt binary file" << std::endl;
+        std::cout << "8. Decrypt Base64 ciphertext to binary string" << std::endl;
+        std::cout << "9. Load binary file into string" << std::endl;
+        std::cout << "10. Exit" << std::endl;
+        std::cout << "Choose an option (1-10): ";
 
         int choice;
         std::cin >> choice;
@@ -184,11 +189,110 @@ int main() {
             break;
         }
         case 6: {
+            std::cout << "Enter string to save (leave empty to use the last encryption result): ";
+            std::string dataToSave;
+            std::getline(std::cin, dataToSave);
+
+            if (dataToSave.empty()) {
+                if (result.empty()) {
+                    std::cout << "No previous encryption result available. Please enter a string." << std::endl;
+                    break;
+                }
+                dataToSave = result;
+                std::cout << "Using last encryption result." << std::endl;
+            }
+
+            std::cout << "Enter target file path: ";
+            std::string targetPath;
+            std::getline(std::cin, targetPath);
+
+            try {
+                WriteStringToBinaryFile(targetPath, dataToSave);
+                std::cout << "String saved to file: \"" << targetPath << "\"" << std::endl;
+            } catch (const std::exception& e) {
+                std::cout << "Failed to save string: " << e.what() << std::endl;
+            }
+            break;
+        }
+        case 7: {
+            if (!hasKeyPair) {
+                std::cout << "Please generate or input a key pair first." << std::endl;
+                break;
+            }
+
+            std::cout << "Enter source binary file path: ";
+            std::string sourcePath;
+            std::getline(std::cin, sourcePath);
+
+            try {
+                std::string binaryData = ReadBinaryFileToString(sourcePath);
+                std::vector<long long> encrypted = RSA::encryptText(binaryData, keyPair);
+                result = encodeCiphertextBase64(encrypted);
+                std::cout << "Encrypted Base64 (use option 6 to save if needed):" << std::endl;
+                std::cout << result << std::endl;
+            } catch (const std::exception& e) {
+                std::cout << "Binary encryption failed: " << e.what() << std::endl;
+            }
+            break;
+        }
+        case 8: {
+            if (!hasKeyPair) {
+                std::cout << "Please generate or input a key pair first." << std::endl;
+                break;
+            }
+
+            std::cout << "Enter Base64 ciphertext (or comma-separated numbers): ";
+            std::string ciphertextInput;
+            std::getline(std::cin, ciphertextInput);
+
+            try {
+                std::vector<long long> encrypted = parseCiphertext(ciphertextInput);
+                std::string decrypted = RSA::decryptText(encrypted, keyPair);
+                result = decrypted;
+                const std::string base64Preview = cppcodec::base64_rfc4648::encode(
+                    reinterpret_cast<const uint8_t*>(decrypted.data()),
+                    decrypted.size()
+                );
+                std::cout << "Decrypted binary data stored in memory (use option 6 to save)." << std::endl;
+                if (!base64Preview.empty()) {
+                    std::cout << "Base64 preview: " << base64Preview << std::endl;
+                } else {
+                    std::cout << "Decrypted data is empty." << std::endl;
+                }
+            } catch (const std::exception& e) {
+                std::cout << "Binary decryption failed: " << e.what() << std::endl;
+            }
+            break;
+        }
+        case 9: {
+            std::cout << "Enter binary file path: ";
+            std::string sourcePath;
+            std::getline(std::cin, sourcePath);
+
+            try {
+                std::string binaryData = ReadBinaryFileToString(sourcePath);
+                result = binaryData;
+                const std::string base64Preview = cppcodec::base64_rfc4648::encode(
+                    reinterpret_cast<const uint8_t*>(binaryData.data()),
+                    binaryData.size()
+                );
+                std::cout << "Binary file loaded into memory (use option 6 to save elsewhere)." << std::endl;
+                if (!base64Preview.empty()) {
+                    std::cout << "Base64 preview: " << base64Preview << std::endl;
+                } else {
+                    std::cout << "Loaded data is empty." << std::endl;
+                }
+            } catch (const std::exception& e) {
+                std::cout << "Failed to load binary file: " << e.what() << std::endl;
+            }
+            break;
+        }
+        case 10: {
             std::cout << "Exiting program. Goodbye!" << std::endl;
             return 0;
         }
         default: {
-            std::cout << "Invalid option. Please choose a number between 1 and 6." << std::endl;
+            std::cout << "Invalid option. Please choose a number between 1 and 10." << std::endl;
             break;
         }
         }
