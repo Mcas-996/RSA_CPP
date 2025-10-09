@@ -1,5 +1,7 @@
 # RSA_CPP
 
+Chinese version: [README_zh.md](README_zh.md)
+
 An RSA encryption/decryption library implemented in C++, providing both Graphical User Interface (GUI) and Command Line Interface (CLI) versions.
 
 ## Project Overview
@@ -122,8 +124,20 @@ Options:
 3. Show current key pair
 4. Encrypt text
 5. Decrypt text
-6. Exit
+6. Save string to binary file
+7. Encrypt binary file
+8. Decrypt Base64 ciphertext to binary string
+9. Load binary file into string
+10. Exit
 ```
+
+Notes about workflow
+- The program keeps an in-memory buffer `result` that stores the latest produced string. This can be either plaintext, Base64 ciphertext, or raw binary data represented as a string of bytes.
+- Option 6 writes any current string as-is to a file in binary mode. It does not perform Base64 decoding automatically. Use option 8 to decrypt Base64 into raw bytes first, then use option 6 to persist them.
+- Options 7/8/9 are convenient helpers for binary workflows:
+  - 7 reads a binary file, encrypts it, and prints/keeps Base64 in memory.
+  - 8 accepts Base64 (or comma-separated numeric ciphertext), decrypts it into raw bytes stored in memory, with a Base64 preview for verification.
+  - 9 loads any binary file into memory (no encryption/decryption), also showing a Base64 preview.
 
 #### Usage Examples
 
@@ -241,3 +255,38 @@ Mcas-996
 - Implemented complete RSA algorithm
 - Provided both GUI and CLI interfaces
 - Supported text encryption/decryption functionality
+4. **Encrypt a binary file and get Base64**
+   ```
+   Choose an option (1-10): 7
+   Enter source binary file path: ./data/input.bin
+   Encrypted Base64 (use option 6 to save if needed):
+   <Base64 ciphertext here>
+   ```
+
+5. **Decrypt Base64 ciphertext and save binary output**
+   ```
+   Choose an option (1-10): 8
+   Enter Base64 ciphertext (or comma-separated numbers): <paste here>
+   Decrypted binary data stored in memory (use option 6 to save).
+   Base64 preview: <preview>
+
+   Choose an option (1-10): 6
+   Enter string to save (leave empty to use the last encryption result):
+   <press Enter>
+   Enter target file path: ./data/output.bin
+   String saved to file: "./data/output.bin"
+   ```
+
+6. **Load a binary file into memory and re-save**
+   ```
+   Choose an option (1-10): 9
+   Enter binary file path: ./data/input.bin
+   Binary file loaded into memory (use option 6 to save elsewhere).
+   Base64 preview: <preview>
+
+   Choose an option (1-10): 6
+   Enter string to save (leave empty to use the last encryption result):
+   <press Enter>
+   Enter target file path: ./data/copy.bin
+   String saved to file: "./data/copy.bin"
+   ```
