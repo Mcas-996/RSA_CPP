@@ -48,6 +48,19 @@ else()
     target_compile_definitions(RSA_CPP PRIVATE HAS_GLFW)
 endif()
 
+set(GLFW_LINK_TARGET "")
+if(glfw3_FOUND)
+    if(TARGET glfw)
+        set(GLFW_LINK_TARGET glfw)
+    elseif(TARGET glfw::glfw)
+        set(GLFW_LINK_TARGET glfw::glfw)
+    elseif(glfw3_LIBRARIES)
+        set(GLFW_LINK_TARGET ${glfw3_LIBRARIES})
+    else()
+        set(GLFW_LINK_TARGET glfw)
+    endif()
+endif()
+
 # 为图形界面版本配置包含目录和链接库
 target_include_directories(RSA_CPP PRIVATE
     ${CMAKE_SOURCE_DIR}/ImGui
@@ -74,7 +87,7 @@ elseif(APPLE)
 
     target_link_libraries(RSA_CPP PRIVATE
         OpenGL::GL
-        glfw
+        ${GLFW_LINK_TARGET}
         ${COCOA_LIBRARY}
         ${IOKIT_LIBRARY}
         ${COREVIDEO_LIBRARY}
@@ -85,7 +98,7 @@ elseif(APPLE)
 else()
     target_link_libraries(RSA_CPP PRIVATE
         OpenGL::GL
-        glfw
+        ${GLFW_LINK_TARGET}
         ${CMAKE_DL_LIBS}
     )
 endif()

@@ -174,7 +174,7 @@ void CleanupGraphicsAndWindow()
         UnregisterClass(_T("ImGui"), GetModuleHandle(NULL));
     }
 #else
-    // Linux cleanup
+    // Linux/macOS cleanup
 #if defined(HAS_GLFW)
     if (g_window) {
         glfwDestroyWindow(g_window);

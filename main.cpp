@@ -57,7 +57,7 @@ int main() {
             ::DispatchMessage(&msg);
         }
 #else
-    while (true) {  // For Linux, we handle loop exit differently
+    while (true) {  // For Linux/macOS, we handle loop exit differently
         frameCount++;
         //if (frameCount % 60 == 0) { // Output every 60 frames
         //    std::cout << "Ran " << frameCount << " frames" << std::endl;
