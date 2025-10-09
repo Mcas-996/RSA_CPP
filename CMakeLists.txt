@@ -42,10 +42,23 @@ if(NOT glfw3_FOUND)
 endif()
 
 if(NOT glfw3_FOUND)
-    message(WARNING "GLFW not found. GUI will not be available on Linux.")
+    message(WARNING "GLFW not found. GUI will not be available on Linux/macOS.")
     target_compile_definitions(RSA_CPP PRIVATE NO_GLFW)
 else()
     target_compile_definitions(RSA_CPP PRIVATE HAS_GLFW)
+endif()
+
+set(GLFW_LINK_TARGET "")
+if(glfw3_FOUND)
+    if(TARGET glfw)
+        set(GLFW_LINK_TARGET glfw)
+    elseif(TARGET glfw::glfw)
+        set(GLFW_LINK_TARGET glfw::glfw)
+    elseif(glfw3_LIBRARIES)
+        set(GLFW_LINK_TARGET ${glfw3_LIBRARIES})
+    else()
+        set(GLFW_LINK_TARGET glfw)
+    endif()
 endif()
 
 # 为图形界面版本配置包含目录和链接库
@@ -67,10 +80,25 @@ if(WIN32)
         winmm       # Windows Multimedia
         xinput      # XInput API for game controllers
     )
+elseif(APPLE)
+    find_library(COCOA_LIBRARY Cocoa)
+    find_library(IOKIT_LIBRARY IOKit)
+    find_library(COREVIDEO_LIBRARY CoreVideo)
+
+    target_link_libraries(RSA_CPP PRIVATE
+        OpenGL::GL
+        ${GLFW_LINK_TARGET}
+        ${COCOA_LIBRARY}
+        ${IOKIT_LIBRARY}
+        ${COREVIDEO_LIBRARY}
+        ${CMAKE_DL_LIBS}
+    )
+
+    target_compile_definitions(RSA_CPP PRIVATE GL_SILENCE_DEPRECATION)
 else()
     target_link_libraries(RSA_CPP PRIVATE
         OpenGL::GL
-        glfw
+        ${GLFW_LINK_TARGET}
         ${CMAKE_DL_LIBS}
     )
 endif()

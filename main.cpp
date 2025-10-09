@@ -12,8 +12,8 @@ int main() {
     //std::cout << "Application starting..." << std::endl;
 
 #if !defined(_WIN32) && defined(NO_GLFW)
-    std::cerr << "Error: GLFW library not found. Cannot run GUI on Linux without GLFW." << std::endl;
-    std::cerr << "Please install GLFW3 development libraries: sudo apt install libglfw3-dev" << std::endl;
+    std::cerr << "Error: GLFW library not found. Cannot run GUI on Linux/macOS without GLFW." << std::endl;
+    std::cerr << "Please install GLFW3 development libraries. On Debian/Ubuntu: sudo apt install libglfw3-dev" << std::endl;
     return 1;
 #endif
 
@@ -32,7 +32,7 @@ int main() {
 #if defined(HAS_GLFW)
     extern GLFWwindow* g_window;
     ImGui_ImplGlfw_InitForOpenGL(g_window, true);
-    ImGui_ImplOpenGL3_Init("#version 130");
+    ImGui_ImplOpenGL3_Init(GetOpenGLGLSLVersion());
 #endif
 #endif
 
@@ -57,7 +57,7 @@ int main() {
             ::DispatchMessage(&msg);
         }
 #else
-    while (true) {  // For Linux, we handle loop exit differently
+    while (true) {  // For Linux/macOS, we handle loop exit differently
         frameCount++;
         //if (frameCount % 60 == 0) { // Output every 60 frames
         //    std::cout << "Ran " << frameCount << " frames" << std::endl;

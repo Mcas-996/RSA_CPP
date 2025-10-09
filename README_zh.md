@@ -11,7 +11,7 @@
 - 支持ASCII字符的完整加密流程
 
 项目提供两种界面：
-- **图形界面版本**：基于ImGui和DirectX 11的现代化GUI应用
+- **图形界面版本**：基于ImGui的现代化GUI应用（Windows使用DirectX 11，Linux/macOS使用GLFW+OpenGL）
 - **命令行版本**：传统的CLI工具，适合脚本和自动化使用
 
 ## 功能特性
@@ -47,10 +47,22 @@ RSA_CPP/
 ## 构建和运行
 
 ### 环境要求
-- **操作系统**: Windows
+- **操作系统**: Windows、Linux或macOS
 - **编译器**: 支持C++17的编译器（MSVC, GCC, Clang）
 - **构建工具**: CMake 3.15或更高版本
-- **图形界面依赖**: DirectX 11
+- **图形界面依赖**:
+  - Windows：DirectX 11（随Windows SDK提供）
+  - Linux/macOS：OpenGL 3.0+ 和 GLFW 3
+
+在Linux/macOS上可以通过包管理器安装GLFW：
+
+```bash
+# Debian/Ubuntu
+sudo apt install libglfw3-dev
+
+# macOS (Homebrew)
+brew install glfw
+```
 
 ### 构建步骤
 
@@ -74,14 +86,14 @@ RSA_CPP/
 
 构建成功后，会在`build/`目录下生成两个可执行文件：
 
-- **图形界面版本**: `RSA_CPP.exe`
+- **图形界面版本**: `RSA_CPP`（Windows上为 `RSA_CPP.exe`）
   ```bash
-  ./build/RSA_CPP.exe
+  ./build/RSA_CPP
   ```
 
-- **命令行版本**: `RSA_CLI.exe`
+- **命令行版本**: `RSA_CLI`（Windows上为 `RSA_CLI.exe`）
   ```bash
-  ./build/RSA_CLI.exe
+  ./build/RSA_CLI
   ```
 
 ## 使用说明

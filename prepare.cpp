@@ -1,5 +1,7 @@
 #include "prepare.hpp"
 
+#include <cstdio>
+
 #if defined(_WIN32)
 // Windows specific implementation
 #include "ImGui/imgui_impl_win32.h"
@@ -94,7 +96,7 @@ void CleanupDeviceD3D()
     if (g_pd3dDevice) { g_pd3dDevice->Release(); g_pd3dDevice = NULL; }
 }
 #elif defined(HAS_GLFW)
-// Linux implementation with GLFW + OpenGL
+// Linux/macOS implementation with GLFW + OpenGL
 #include <GLFW/glfw3.h>
 GLFWwindow* g_window = nullptr;
 
@@ -102,6 +104,13 @@ GLFWwindow* g_window = nullptr;
 void glfw_error_callback(int error, const char* description)
 {
     fprintf(stderr, "GLFW Error %d: %s\n", error, description);
+}
+
+static const char* g_GlslVersion = "#version 130";
+
+const char* GetOpenGLGLSLVersion()
+{
+    return g_GlslVersion;
 }
 #endif
 
@@ -121,16 +130,25 @@ bool InitializeWindowAndGraphics(int width, int height, const char* title)
 
     return true;
 #else
-    // Linux implementation - only available if GLFW is present
+    // Linux/macOS implementation - only available if GLFW is present
 #if defined(HAS_GLFW)
     glfwSetErrorCallback(glfw_error_callback);
     if (!glfwInit())
         return false;
 
-    // GL 3.0 + GLSL 130
-    const char* glsl_version = "#version 130";
+#if defined(__APPLE__)
+    // GL 3.2 + GLSL 150 core profile for macOS
+    glfwWindowHint(GLFW_CONTEXT_VERSION_MAJOR, 3);
+    glfwWindowHint(GLFW_CONTEXT_VERSION_MINOR, 2);
+    glfwWindowHint(GLFW_OPENGL_PROFILE, GLFW_OPENGL_CORE_PROFILE);
+    glfwWindowHint(GLFW_OPENGL_FORWARD_COMPAT, GL_TRUE);
+    g_GlslVersion = "#version 150";
+#else
+    // GL 3.0 + GLSL 130 for Linux
+    g_GlslVersion = "#version 130";
     glfwWindowHint(GLFW_CONTEXT_VERSION_MAJOR, 3);
     glfwWindowHint(GLFW_CONTEXT_VERSION_MINOR, 0);
+#endif
 
     g_window = glfwCreateWindow(width, height, title, NULL, NULL);
     if (g_window == nullptr)
@@ -156,7 +174,7 @@ void CleanupGraphicsAndWindow()
         UnregisterClass(_T("ImGui"), GetModuleHandle(NULL));
     }
 #else
-    // Linux cleanup
+    // Linux/macOS cleanup
 #if defined(HAS_GLFW)
     if (g_window) {
         glfwDestroyWindow(g_window);

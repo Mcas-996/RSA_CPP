@@ -11,7 +11,7 @@ This project implements a complete RSA public-key encryption algorithm, includin
 - Complete encryption workflow supporting ASCII characters
 
 The project provides two interfaces:
-- **GUI Version**: Modern GUI application based on ImGui and DirectX 11
+- **GUI Version**: Modern GUI application based on ImGui (DirectX 11 on Windows, GLFW/OpenGL on Linux/macOS)
 - **CLI Version**: Traditional command-line tool suitable for scripting and automation
 
 > **Note**: Chinese documentation is available in [README_zh.md](README_zh.md)
@@ -49,10 +49,22 @@ RSA_CPP/RSA_CPP/
 ## Building and Running
 
 ### Requirements
-- **Operating System**: Windows
+- **Operating System**: Windows, Linux, or macOS
 - **Compiler**: C++17 compatible compiler (MSVC, GCC, Clang)
 - **Build Tool**: CMake 3.15 or higher
-- **GUI Dependencies**: DirectX 11
+- **GUI Dependencies**:
+  - Windows: DirectX 11 (included with Windows SDK)
+  - Linux/macOS: OpenGL 3.0+ and GLFW 3
+
+For Linux/macOS you can install GLFW via your package manager:
+
+```bash
+# Debian/Ubuntu
+sudo apt install libglfw3-dev
+
+# macOS (Homebrew)
+brew install glfw
+```
 
 ### Build Steps
 
@@ -76,14 +88,14 @@ RSA_CPP/RSA_CPP/
 
 After successful build, two executable files will be generated in the `build/` directory:
 
-- **GUI Version**: `RSA_CPP.exe`
+- **GUI Version**: `RSA_CPP` (`RSA_CPP.exe` on Windows)
   ```bash
-  ./build/RSA_CPP.exe
+  ./build/RSA_CPP
   ```
 
-- **CLI Version**: `RSA_CLI.exe`
+- **CLI Version**: `RSA_CLI` (`RSA_CLI.exe` on Windows)
   ```bash
-  ./build/RSA_CLI.exe
+  ./build/RSA_CLI
   ```
 
 ## Usage Instructions
