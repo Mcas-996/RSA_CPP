@@ -77,6 +77,21 @@ int main() {
         NewFrame();
         ImGui::NewFrame();
 
+        // Menu: tools and layout helpers
+        if (ImGui::BeginMainMenuBar()) {
+            if (ImGui::BeginMenu("Layout")) {
+                if (ImGui::MenuItem("Reset to Default")) {
+                    // Clear current ini settings in memory and force first-use defaults next frame
+                    ImGui::LoadIniSettingsFromMemory("");
+                    // Optionally save immediately so that file reflects defaults on next start
+                    if (ImGui::GetIO().IniFilename)
+                        ImGui::SaveIniSettingsToDisk(ImGui::GetIO().IniFilename);
+                }
+                ImGui::EndMenu();
+            }
+            ImGui::EndMainMenuBar();
+        }
+
         ImGui::ShowDemoWindow();
         Myspace::input_KP_window();
         Myspace::Generate_KP_window();
