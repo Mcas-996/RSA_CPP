@@ -1,6 +1,74 @@
 #include "RSA.hpp"
+#include "third_party/cppcodec/cppcodec/base64_rfc4648.hpp"
+#include <cctype>
+#include <cstdint>
 #include <iostream>
+#include <stdexcept>
 #include <string>
+#include <vector>
+
+namespace {
+std::string encodeCiphertextBase64(const std::vector<long long>& values) {
+    std::vector<uint8_t> bytes;
+    bytes.reserve(values.size() * sizeof(uint64_t));
+    for (long long value : values) {
+        uint64_t uvalue = static_cast<uint64_t>(value);
+        for (int shift = 0; shift < 64; shift += 8) {
+            bytes.push_back(static_cast<uint8_t>((uvalue >> shift) & 0xFF));
+        }
+    }
+    return cppcodec::base64_rfc4648::encode(bytes);
+}
+
+std::vector<long long> decodeCiphertextBase64(const std::string& encoded) {
+    std::vector<uint8_t> bytes = cppcodec::base64_rfc4648::decode(encoded);
+    if (bytes.size() % sizeof(uint64_t) != 0) {
+        throw std::invalid_argument("Base64 ciphertext length mismatch");
+    }
+    std::vector<long long> values(bytes.size() / sizeof(uint64_t));
+    for (size_t i = 0; i < values.size(); ++i) {
+        uint64_t value = 0;
+        for (int byte = 0; byte < 8; ++byte) {
+            value |= static_cast<uint64_t>(bytes[i * 8 + byte]) << (byte * 8);
+        }
+        values[i] = static_cast<long long>(value);
+    }
+    return values;
+}
+
+std::string stripWhitespace(const std::string& input) {
+    std::string cleaned;
+    cleaned.reserve(input.size());
+    for (unsigned char c : input) {
+        if (!std::isspace(c)) {
+            cleaned.push_back(static_cast<char>(c));
+        }
+    }
+    return cleaned;
+}
+
+bool isNumericCiphertext(const std::string& input) {
+    if (input.empty()) {
+        return true;
+    }
+    return input.find_first_not_of("0123456789,-") == std::string::npos;
+}
+
+std::vector<long long> parseCiphertext(const std::string& input) {
+    const std::string cleaned = stripWhitespace(input);
+    if (cleaned.empty()) {
+        return {};
+    }
+    try {
+        return decodeCiphertextBase64(cleaned);
+    } catch (const std::exception&) {
+        if (isNumericCiphertext(cleaned)) {
+            return RSA::stringToCiphertext(cleaned);
+        }
+        throw;
+    }
+}
+} // namespace
 
 int main() {
     std::cout << "RSA Encryption/Decryption CLI Tool" << std::endl;
@@ -80,8 +148,8 @@ int main() {
                 }
                 std::cout << std::endl;
                 
-                result = RSA::ciphertextToString(encrypted);
-                std::cout << "Encrypted text: " << result << std::endl;
+                result = encodeCiphertextBase64(encrypted);
+                std::cout << "Encrypted Base64: " << result << std::endl;
             } catch (const std::exception& e) {
                 std::cout << "Encryption failed: " << e.what() << std::endl;
             }
@@ -93,14 +161,14 @@ int main() {
                 break;
             }
             
-            std::cout << "Enter text to decrypt: ";
+            std::cout << "Enter Base64 ciphertext (or comma-separated numbers): ";
             std::string ciphertextInput;
             std::getline(std::cin, ciphertextInput);
             
             std::cout << "Text to decrypt: \"" << ciphertextInput << "\"" << std::endl;
             
             try {
-                std::vector<long long> encrypted = RSA::stringToCiphertext(ciphertextInput);
+                std::vector<long long> encrypted = parseCiphertext(ciphertextInput);
                 std::cout << "Numbers to decrypt: ";
                 for (size_t i = 0; i < encrypted.size(); ++i) {
                     std::cout << encrypted[i];

@@ -5,9 +5,13 @@
 #include "RSA.hpp"
 #include "Auto.h"
 #include "prepare.hpp"
+#include "third_party/cppcodec/cppcodec/base64_rfc4648.hpp"
+#include <cctype>
+#include <cstdint>
 #include <iostream>
 #include <cstring>
 #include <cstdio>
+#include <stdexcept>
 //namespace Myspace {
 //	void mywindow() {
 //		using namespace ImGui;
@@ -69,16 +73,77 @@ namespace Myspace {
             return 0;
         }
 
-        static std::string sanitizeNumericInput(const char* buffer) {
+        static std::string sanitizeCipherInput(const char* buffer) {
             std::string cleaned;
             const size_t len = std::strlen(buffer);
             cleaned.reserve(len);
             for (size_t i = 0; i < len; ++i) {
-                const char c = buffer[i];
-                if (c != '\n' && c != '\r' && c != ' ')
-                    cleaned.push_back(c);
+                const unsigned char c = static_cast<unsigned char>(buffer[i]);
+                if (!std::isspace(c))
+                    cleaned.push_back(static_cast<char>(c));
             }
             return cleaned;
+        }
+
+        static std::string stripWhitespace(const std::string& input) {
+            std::string cleaned;
+            cleaned.reserve(input.size());
+            for (unsigned char c : input) {
+                if (!std::isspace(c)) {
+                    cleaned.push_back(static_cast<char>(c));
+                }
+            }
+            return cleaned;
+        }
+
+        static std::string encodeCiphertextBase64(const std::vector<long long>& values) {
+            std::vector<uint8_t> bytes;
+            bytes.reserve(values.size() * sizeof(uint64_t));
+            for (long long value : values) {
+                uint64_t uvalue = static_cast<uint64_t>(value);
+                for (int byte = 0; byte < 8; ++byte) {
+                    bytes.push_back(static_cast<uint8_t>((uvalue >> (byte * 8)) & 0xFF));
+                }
+            }
+            return cppcodec::base64_rfc4648::encode(bytes);
+        }
+
+        static std::vector<long long> decodeCiphertextBase64(const std::string& encoded) {
+            std::vector<uint8_t> bytes = cppcodec::base64_rfc4648::decode(encoded);
+            if (bytes.size() % sizeof(uint64_t) != 0) {
+                throw std::invalid_argument("Base64 ciphertext length mismatch");
+            }
+            std::vector<long long> values(bytes.size() / sizeof(uint64_t));
+            for (size_t i = 0; i < values.size(); ++i) {
+                uint64_t value = 0;
+                for (int byte = 0; byte < 8; ++byte) {
+                    value |= static_cast<uint64_t>(bytes[i * 8 + byte]) << (byte * 8);
+                }
+                values[i] = static_cast<long long>(value);
+            }
+            return values;
+        }
+
+        static bool isNumericCiphertext(const std::string& input) {
+            if (input.empty()) {
+                return true;
+            }
+            return input.find_first_not_of("0123456789,-") == std::string::npos;
+        }
+
+        static std::vector<long long> parseCiphertext(const std::string& input) {
+            const std::string cleaned = stripWhitespace(input);
+            if (cleaned.empty()) {
+                return {};
+            }
+            try {
+                return decodeCiphertextBase64(cleaned);
+            } catch (const std::exception&) {
+                if (isNumericCiphertext(cleaned)) {
+                    return RSA::stringToCiphertext(cleaned);
+                }
+                throw;
+            }
         }
 
         static std::string wrapForDisplay(const std::string& input, int wrap_column, bool break_after_comma = false) {
@@ -179,7 +244,7 @@ namespace Myspace {
             // Convert public key
             if (strlen(public_key_buffer) > 0) {
                 try {
-                    puk = detail::sanitizeNumericInput(public_key_buffer);
+                    puk = detail::sanitizeCipherInput(public_key_buffer);
                 }
                 catch (const std::exception& e) {
                     TextColored(ImVec4(1.0f, 0.0f, 0.0f, 1.0f), "Invalid Public Key!");
@@ -189,7 +254,7 @@ namespace Myspace {
             // Convert private key
             if (strlen(private_key_buffer) > 0) {
                 try {
-                    prk = detail::sanitizeNumericInput(private_key_buffer);
+                    prk = detail::sanitizeCipherInput(private_key_buffer);
                 }
                 catch (const std::exception& e) {
                     TextColored(ImVec4(1.0f, 0.0f, 0.0f, 1.0f), "Invalid Private Key!");
@@ -199,7 +264,7 @@ namespace Myspace {
             // Convert modulus
             if (strlen(mod_number_buffer) > 0) {
                 try {
-                    modn = detail::sanitizeNumericInput(mod_number_buffer);
+                    modn = detail::sanitizeCipherInput(mod_number_buffer);
                 }
                 catch (const std::exception& e) {
                     TextColored(ImVec4(1.0f, 0.0f, 0.0f, 1.0f), "Invalid Mod Number!");
@@ -279,11 +344,14 @@ namespace Myspace {
         Begin("encrypt");
         static char buffer[4096];
         Text("text:");
+        static detail::AutoWrapUserData plaintext_wrap{ 64, false };
         InputTextMultiline("##text_input",
                            buffer,
                            sizeof(buffer),
                            ImVec2(-FLT_MIN, ImGui::GetTextLineHeight() * 8),
-                           ImGuiInputTextFlags_NoHorizontalScroll);
+                           ImGuiInputTextFlags_NoHorizontalScroll | ImGuiInputTextFlags_CallbackAlways,
+                           detail::AutoWrapCallback,
+                           &plaintext_wrap);
         std::string s(buffer);
         Text("length: %s\n", std::to_string(s.size()).c_str());
         if (Button("encrypt")) {
@@ -292,7 +360,7 @@ namespace Myspace {
             /*for (auto i : res) {
                 std::cout << (std::to_string(i).c_str()) << std::endl;
             }*/ // Debug content
-            result = RSA::ciphertextToString(res);
+            result = detail::encodeCiphertextBase64(res);
         }
         End();
     }
@@ -313,9 +381,15 @@ namespace Myspace {
         std::string s(buffer);
         Text("length: %s\n", std::to_string(s.size()).c_str());
         if (Button("decrypt")) {
-            auto a = RSA::stringToCiphertext(detail::sanitizeNumericInput(buffer));
-            s = RSA::decryptText(a, KP);
-            result = s;
+            try {
+                const std::string cleaned = detail::sanitizeCipherInput(buffer);
+                const std::vector<long long> ciphertext = detail::parseCiphertext(cleaned);
+                s = RSA::decryptText(ciphertext, KP);
+                result = s;
+            } catch (const std::exception& e) {
+                result = std::string("Decrypt failed: ") + e.what();
+                std::cerr << result << std::endl;
+            }
         }
        
         End();
@@ -325,8 +399,22 @@ namespace Myspace {
         SetWindowPosSizeRatio("result", ImVec2(0.47f, 0.63f), ImVec2(0.48f, 0.34f));
         Begin("result");
         static char result_buffer[4096] = "";
-        const std::string wrapped_result = detail::wrapForDisplay(result, 64, true);
+        int wrap_column = 64;
+        const float avail_width = ImGui::GetContentRegionAvail().x;
+        if (avail_width > 0.0f) {
+            const float char_width = ImGui::CalcTextSize("M").x;
+            if (char_width > 0.0f) {
+                wrap_column = static_cast<int>(avail_width / char_width);
+                if (wrap_column < 1) {
+                    wrap_column = 1;
+                }
+            }
+        }
+        const std::string wrapped_result = detail::wrapForDisplay(result, wrap_column);
         snprintf(result_buffer, sizeof(result_buffer), "%s", wrapped_result.c_str());
+        if (Button("Copy result")) {
+            SetClipboardText(result.c_str());
+        }
         InputTextMultiline("##ResultDisplay",
                          result_buffer,
                          sizeof(result_buffer),
