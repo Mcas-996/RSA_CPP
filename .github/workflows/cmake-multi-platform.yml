@@ -150,8 +150,8 @@ jobs:
         cd "$workspace/build"
         ctest --build-config ${{ matrix.build_type }}
 
-    - name: Collect artifacts (Linux/macOS)
-      if: matrix.os != 'windows-latest'
+    - name: Collect artifacts (Linux)
+      if: matrix.os == 'ubuntu-latest'
       run: |
         build_dir="${{ steps.strings.outputs.build-output-dir }}"
         artifact_dir="${build_dir}/artifacts"
@@ -169,6 +169,57 @@ jobs:
           echo "No binaries found; creating placeholder to keep artifact step happy."
           echo "Build produced no binaries to archive." > "${artifact_dir}/NO_ARTIFACTS.txt"
         fi
+    - name: Bundle macOS artifacts
+      if: matrix.os == 'macos-latest'
+      shell: bash
+      run: |
+        set -euo pipefail
+        build_dir="${{ steps.strings.outputs.build-output-dir }}"
+        artifact_dir="${build_dir}/artifacts"
+        mkdir -p "${artifact_dir}"
+
+        resolve_binary() {
+          local name="$1"
+          local dir="$2"
+          if [[ -f "${dir}/${name}" ]]; then
+            echo "${dir}/${name}"
+            return 0
+          fi
+          if [[ -f "${dir}/Release/${name}" ]]; then
+            echo "${dir}/Release/${name}"
+            return 0
+          fi
+          if [[ -f "${dir}/${name}.app/Contents/MacOS/${name}" ]]; then
+            echo "${dir}/${name}.app/Contents/MacOS/${name}"
+            return 0
+          fi
+          return 1
+        }
+
+        openssl_prefix="$(brew --prefix openssl@3)"
+        glfw_prefix="$(brew --prefix glfw)"
+
+        cli_binary="$(resolve_binary RSA_CLI "${build_dir}")"
+        gui_binary="$(resolve_binary RSA_CPP "${build_dir}")"
+
+        if [[ -z "${cli_binary}" && -z "${gui_binary}" ]]; then
+          echo "No macOS binaries found to bundle."
+          exit 1
+        fi
+
+        if [[ -n "${cli_binary}" ]]; then
+          cli_out="${artifact_dir}/RSA_CLI_macOS"
+          bash scripts/bundle_macos_binary.sh "${cli_binary}" "${cli_out}" "${openssl_prefix}" "-"
+          (cd "${artifact_dir}" && zip -qr "RSA_CLI_macOS.zip" "$(basename "${cli_out}")")
+        fi
+
+        if [[ -n "${gui_binary}" ]]; then
+          gui_out="${artifact_dir}/RSA_CPP_macOS"
+          bash scripts/bundle_macos_binary.sh "${gui_binary}" "${gui_out}" "${openssl_prefix}" "${glfw_prefix}"
+          (cd "${artifact_dir}" && zip -qr "RSA_CPP_macOS.zip" "$(basename "${gui_out}")")
+        fi
+
+        find "${artifact_dir}" -maxdepth 1 -type d -name "RSA_*_macOS" -exec rm -rf {} +
 
     - name: Collect artifacts (Windows)
       if: matrix.os == 'windows-latest'

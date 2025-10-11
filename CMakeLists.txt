@@ -5,6 +5,26 @@ set(CMAKE_CXX_STANDARD 17)
 set(CMAKE_CXX_STANDARD_REQUIRED ON)
 set(CMAKE_CXX_EXTENSIONS OFF)
 
+include(FetchContent)
+
+set(CPPCODEC_SOURCE_DIR "${CMAKE_SOURCE_DIR}/third_party/cppcodec")
+if(EXISTS "${CPPCODEC_SOURCE_DIR}/cppcodec/base64_rfc4648.hpp")
+    set(CPPCODEC_INCLUDE_DIR "${CPPCODEC_SOURCE_DIR}")
+else()
+    message(STATUS "third_party/cppcodec not found locally, fetching with FetchContent...")
+    FetchContent_Declare(
+        cppcodec
+        GIT_REPOSITORY https://github.com/tplgy/cppcodec.git
+        GIT_TAG v0.2
+        SOURCE_DIR "${CPPCODEC_SOURCE_DIR}"
+    )
+    FetchContent_GetProperties(cppcodec)
+    if(NOT cppcodec_POPULATED)
+        FetchContent_Populate(cppcodec)
+    endif()
+    set(CPPCODEC_INCLUDE_DIR "${CPPCODEC_SOURCE_DIR}")
+endif()
+
 add_executable(RSA_CPP
     main.cpp
     prepare.cpp
@@ -42,6 +62,9 @@ if(NOT glfw3_FOUND)
     target_compile_definitions(RSA_CPP PRIVATE NO_GLFW)
 else()
     target_compile_definitions(RSA_CPP PRIVATE HAS_GLFW)
+    if(APPLE)
+        target_link_options(RSA_CPP PRIVATE "-Wl,-rpath,@loader_path")
+    endif()
 endif()
 
 set(GLFW_LINK_TARGET "")
@@ -58,6 +81,8 @@ if(glfw3_FOUND)
 endif()
 
 target_include_directories(RSA_CPP PRIVATE
+    ${CMAKE_SOURCE_DIR}
+    ${CPPCODEC_INCLUDE_DIR}
     ${CMAKE_SOURCE_DIR}/ImGui
     ${OPENGL_INCLUDE_DIRS}
     ${glfw3_INCLUDE_DIRS}
@@ -102,7 +127,21 @@ target_link_libraries(RSA_CPP PRIVATE OpenSSL::Crypto)
 
 target_include_directories(RSA_CLI PRIVATE
     ${CMAKE_SOURCE_DIR}
+    ${CPPCODEC_INCLUDE_DIR}
     ${OPENSSL_INCLUDE_DIR}
 )
 
 target_link_libraries(RSA_CLI PRIVATE OpenSSL::Crypto)
+
+if(APPLE)
+    set_target_properties(RSA_CPP PROPERTIES
+        MACOSX_RPATH ON
+        BUILD_WITH_INSTALL_RPATH TRUE
+        INSTALL_RPATH "@loader_path"
+    )
+    set_target_properties(RSA_CLI PROPERTIES
+        MACOSX_RPATH ON
+        BUILD_WITH_INSTALL_RPATH TRUE
+        INSTALL_RPATH "@loader_path"
+    )
+endif()
