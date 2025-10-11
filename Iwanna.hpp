@@ -6,12 +6,16 @@
 #include "Auto.h"
 #include "prepare.hpp"
 #include "third_party/cppcodec/cppcodec/base64_rfc4648.hpp"
+#include <algorithm>
 #include <cctype>
 #include <cstdint>
-#include <iostream>
+#include <filesystem>
 #include <cstring>
 #include <cstdio>
+#include <fstream>
+#include <iterator>
 #include <stdexcept>
+#include <iostream>
 //namespace Myspace {
 //	void mywindow() {
 //		using namespace ImGui;
@@ -94,6 +98,116 @@ namespace Myspace {
                 }
             }
             return cleaned;
+        }
+
+        static std::string trimWhitespace(const std::string& input) {
+            auto begin = std::find_if_not(input.begin(), input.end(),
+                [](unsigned char c) { return std::isspace(c); });
+            auto rend = std::find_if_not(input.rbegin(), input.rend(),
+                [](unsigned char c) { return std::isspace(c); });
+            if (begin == input.end()) {
+                return {};
+            }
+            return std::string(begin, rend.base());
+        }
+
+        static std::string normalizePath(const std::string& input) {
+            std::string trimmed = trimWhitespace(input);
+            if (trimmed.size() >= 2 &&
+                ((trimmed.front() == '"' && trimmed.back() == '"') ||
+                 (trimmed.front() == '\'' && trimmed.back() == '\''))) {
+                trimmed = trimmed.substr(1, trimmed.size() - 2);
+            }
+            return trimmed;
+        }
+
+        static std::string readFileBinary(const std::string& path) {
+            const std::filesystem::path fsPath = std::filesystem::u8path(path);
+            std::ifstream file(fsPath, std::ios::binary);
+            if (!file) {
+                throw std::runtime_error("Failed to open file: " + std::string(fsPath.u8string()));
+            }
+            std::string data((std::istreambuf_iterator<char>(file)), std::istreambuf_iterator<char>());
+            return data;
+        }
+
+        static void writeFileBinary(const std::string& path, const std::string& data) {
+            const std::filesystem::path fsPath = std::filesystem::u8path(path);
+            std::ofstream file(fsPath, std::ios::binary);
+            if (!file) {
+                throw std::runtime_error("Failed to open file for writing: " + std::string(fsPath.u8string()));
+            }
+            file.write(data.data(), static_cast<std::streamsize>(data.size()));
+            if (!file) {
+                throw std::runtime_error("Failed to write file: " + std::string(fsPath.u8string()));
+            }
+        }
+
+        struct StringInputCallbackData {
+            std::string* str;
+            ImGuiInputTextCallback chained_callback;
+            void* chained_user_data;
+        };
+
+        static int InputTextStringCallback(ImGuiInputTextCallbackData* data) {
+            auto* user = static_cast<StringInputCallbackData*>(data->UserData);
+            if (data->EventFlag == ImGuiInputTextFlags_CallbackResize) {
+                user->str->resize(data->BufTextLen);
+                data->Buf = user->str->data();
+                return 0;
+            }
+            if (user->chained_callback) {
+                data->UserData = user->chained_user_data;
+                const int result = user->chained_callback(data);
+                data->UserData = user;
+                return result;
+            }
+            return 0;
+        }
+
+        static bool InputTextMultilineString(const char* label,
+                                             std::string& str,
+                                             const ImVec2& size,
+                                             ImGuiInputTextFlags flags,
+                                             ImGuiInputTextCallback callback = nullptr,
+                                             void* user_data = nullptr) {
+            flags |= ImGuiInputTextFlags_CallbackResize;
+            if (str.capacity() == 0) {
+                str.reserve(1024);
+            }
+            if (str.capacity() < str.size() + 1) {
+                str.reserve(str.size() + 1);
+            }
+            // Ensure null terminator exists for ImGui to read.
+            str.push_back('\0');
+            str.pop_back();
+
+            StringInputCallbackData cb{ &str, callback, user_data };
+            return ImGui::InputTextMultiline(label,
+                                             str.data(),
+                                             str.capacity() + 1,
+                                             size,
+                                             flags,
+                                             InputTextStringCallback,
+                                             &cb);
+        }
+
+        static std::string encodeRawBase64(const std::string& data) {
+            return cppcodec::base64_rfc4648::encode(
+                reinterpret_cast<const uint8_t*>(data.data()), data.size());
+        }
+
+        static std::string decodeBase64ToString(const std::string& base64) {
+            std::vector<uint8_t> bytes = cppcodec::base64_rfc4648::decode(base64);
+            return std::string(reinterpret_cast<const char*>(bytes.data()), bytes.size());
+        }
+
+        static std::string fileToBase64String(const std::string& path) {
+            return encodeRawBase64(readFileBinary(path));
+        }
+
+        static void base64StringToFile(const std::string& base64, const std::string& path) {
+            writeFileBinary(path, decodeBase64ToString(base64));
         }
 
         static std::string encodeCiphertextBase64(const std::vector<long long>& values) {
@@ -182,7 +296,16 @@ namespace Myspace {
     static constexpr size_t KEY_BUFFER_SIZE = 512;
 
     RSA::KeyPair KP;
-    std::string result;
+    enum class ResultType {
+        None,
+        CiphertextBase64,
+        Plaintext,
+        Info,
+        Error
+    };
+    ResultType resultType = ResultType::None;
+    std::string resultPrimary;
+    std::string resultSecondary;
     // Compute a 50% screen workspace anchored near the top-left and helper to place windows proportionally
     static inline void SetWindowPosSizeRatio(const char* /*name*/, ImVec2 rel_pos, ImVec2 rel_size)
     {
@@ -342,25 +465,41 @@ namespace Myspace {
         using namespace ImGui;
         SetWindowPosSizeRatio("encrypt", ImVec2(0.47f, 0.01f), ImVec2(0.48f, 0.30f));
         Begin("encrypt");
-        static char buffer[4096];
+        static std::string buffer;
+        if (buffer.capacity() < 262144) {
+            buffer.reserve(262144);
+        }
         Text("text:");
+        SameLine();
+        if (Button("Get from result##encrypt")) {
+            buffer = resultPrimary;
+        }
         static detail::AutoWrapUserData plaintext_wrap{ 64, false };
-        InputTextMultiline("##text_input",
-                           buffer,
-                           sizeof(buffer),
-                           ImVec2(-FLT_MIN, ImGui::GetTextLineHeight() * 8),
-                           ImGuiInputTextFlags_NoHorizontalScroll | ImGuiInputTextFlags_CallbackAlways,
-                           detail::AutoWrapCallback,
-                           &plaintext_wrap);
-        std::string s(buffer);
-        Text("length: %s\n", std::to_string(s.size()).c_str());
+        detail::InputTextMultilineString("##text_input",
+                                         buffer,
+                                         ImVec2(-FLT_MIN, ImGui::GetTextLineHeight() * 8),
+                                         ImGuiInputTextFlags_NoHorizontalScroll | ImGuiInputTextFlags_CallbackAlways,
+                                         detail::AutoWrapCallback,
+                                         &plaintext_wrap);
+        Text("length: %zu\n", buffer.size());
         if (Button("encrypt")) {
-            const std::string input_buffer = s;
-            std::vector<long long> res = RSA::encryptText(input_buffer, KP);
-            /*for (auto i : res) {
-                std::cout << (std::to_string(i).c_str()) << std::endl;
-            }*/ // Debug content
-            result = detail::encodeCiphertextBase64(res);
+            if (KP.publicKey.empty() || KP.privateKey.empty() || KP.modulus.empty()) {
+                resultPrimary = "Encrypt failed: please generate or input a key pair first.";
+                resultSecondary.clear();
+                resultType = ResultType::Error;
+            } else {
+                try {
+                    std::vector<long long> res = RSA::encryptText(buffer, KP);
+                    resultPrimary = detail::encodeCiphertextBase64(res);
+                    resultSecondary = RSA::ciphertextToString(res);
+                    resultType = ResultType::CiphertextBase64;
+                } catch (const std::exception& e) {
+                    resultPrimary = std::string("Encrypt failed: ") + e.what();
+                    resultSecondary.clear();
+                    resultType = ResultType::Error;
+                    std::cerr << resultPrimary << std::endl;
+                }
+            }
         }
         End();
     }
@@ -368,37 +507,143 @@ namespace Myspace {
         using namespace ImGui;
         SetWindowPosSizeRatio("descrypt", ImVec2(0.47f, 0.32f), ImVec2(0.48f, 0.30f));
         Begin("descrypt");
-        static char buffer[4096];
+        static std::string buffer;
+        if (buffer.capacity() < 262144) {
+            buffer.reserve(262144);
+        }
         static detail::AutoWrapUserData cipher_wrap{ 64, true };
         Text("text:");
-        InputTextMultiline("##decrypt_text",
-                           buffer,
-                           sizeof(buffer),
-                           ImVec2(-FLT_MIN, ImGui::GetTextLineHeight() * 8),
-                           ImGuiInputTextFlags_NoHorizontalScroll | ImGuiInputTextFlags_CallbackAlways,
-                           detail::AutoWrapCallback,
-                           &cipher_wrap);
-        std::string s(buffer);
-        Text("length: %s\n", std::to_string(s.size()).c_str());
+        SameLine();
+        if (Button("Get from result##decrypt")) {
+            buffer = resultPrimary;
+        }
+        detail::InputTextMultilineString("##decrypt_text",
+                                         buffer,
+                                         ImVec2(-FLT_MIN, ImGui::GetTextLineHeight() * 8),
+                                         ImGuiInputTextFlags_NoHorizontalScroll | ImGuiInputTextFlags_CallbackAlways,
+                                         detail::AutoWrapCallback,
+                                         &cipher_wrap);
+        Text("length: %zu\n", buffer.size());
         if (Button("decrypt")) {
-            try {
-                const std::string cleaned = detail::sanitizeCipherInput(buffer);
-                const std::vector<long long> ciphertext = detail::parseCiphertext(cleaned);
-                s = RSA::decryptText(ciphertext, KP);
-                result = s;
-            } catch (const std::exception& e) {
-                result = std::string("Decrypt failed: ") + e.what();
-                std::cerr << result << std::endl;
+            if (KP.publicKey.empty() || KP.privateKey.empty() || KP.modulus.empty()) {
+                resultPrimary = "Decrypt failed: please generate or input a key pair first.";
+                resultSecondary.clear();
+                resultType = ResultType::Error;
+            } else {
+                try {
+                    const std::string cleaned = detail::sanitizeCipherInput(buffer.c_str());
+                    const std::vector<long long> ciphertext = detail::parseCiphertext(cleaned);
+                    const std::string decrypted = RSA::decryptText(ciphertext, KP);
+                    resultPrimary = decrypted;
+                    resultSecondary = RSA::ciphertextToString(ciphertext);
+                    resultType = ResultType::Plaintext;
+                } catch (const std::exception& e) {
+                    resultPrimary = std::string("Decrypt failed: ") + e.what();
+                    resultSecondary.clear();
+                    resultType = ResultType::Error;
+                    std::cerr << resultPrimary << std::endl;
+                }
             }
         }
        
+        End();
+    }
+    void file_window() {
+        using namespace ImGui;
+        SetWindowPosSizeRatio("File I/O", ImVec2(0.01f, 0.75f), ImVec2(0.45f, 0.23f));
+        Begin("File I/O");
+        TextWrapped("Base64 helper (no RSA). Convert binary files to Base64 text and back for transport or inspection.");
+
+        static char convert_path[512] = "";
+        static char dest_path[512] = "";
+        static detail::AutoWrapUserData base64_wrap{ 64, false };
+        static std::string base64_buffer;
+        if (base64_buffer.capacity() < 64 * 1024) {
+            base64_buffer.reserve(64 * 1024);
+        }
+
+        InputText("Binary file path", convert_path, IM_ARRAYSIZE(convert_path));
+        InputText("Target file path", dest_path, IM_ARRAYSIZE(dest_path));
+        static bool enableWrap = true;
+        ImGui::Checkbox("Auto-wrap buffer", &enableWrap);
+        ImGuiInputTextFlags bufferFlags = enableWrap ? ImGuiInputTextFlags_CallbackAlways : ImGuiInputTextFlags_None;
+        SameLine();
+        if (Button("Get from result##buffer")) {
+            base64_buffer = resultPrimary;
+        }
+        detail::InputTextMultilineString("Base64 buffer",
+                                         base64_buffer,
+                                         ImVec2(-FLT_MIN, ImGui::GetTextLineHeight() * 5),
+                                         bufferFlags,
+                                         enableWrap ? detail::AutoWrapCallback : nullptr,
+                                         enableWrap ? static_cast<void*>(&base64_wrap) : nullptr);
+        Text("Buffer length: %zu", base64_buffer.size());
+        SameLine();
+        if (Button("Copy buffer")) {
+            SetClipboardText(base64_buffer.c_str());
+        }
+
+        if (Button("Load file -> Base64 buffer")) {
+            const std::string srcPath = detail::normalizePath(convert_path);
+            if (srcPath.empty()) {
+                resultType = ResultType::Error;
+                resultPrimary = "Convert failed: binary file path cannot be empty.";
+                resultSecondary.clear();
+            } else {
+                try {
+                    const std::string base64 = detail::fileToBase64String(srcPath);
+                    base64_buffer = base64;
+                    resultType = ResultType::Info;
+                    resultPrimary = base64;
+                    resultSecondary = "Base64 length: " + std::to_string(base64.size());
+                } catch (const std::exception& e) {
+                    resultType = ResultType::Error;
+                    resultPrimary = std::string("Convert failed: ") + e.what();
+                    resultSecondary.clear();
+                }
+            }
+        }
+        SameLine();
+        if (Button("Save buffer -> file")) {
+            const std::string dstPath = detail::normalizePath(dest_path);
+            if (dstPath.empty()) {
+                resultType = ResultType::Error;
+                resultPrimary = "Write failed: target file path cannot be empty.";
+                resultSecondary.clear();
+            } else {
+                std::string base64Input = detail::trimWhitespace(base64_buffer);
+                if (base64Input.empty()) {
+                    resultType = ResultType::Error;
+                    resultPrimary = "Write failed: Base64 buffer is empty.";
+                    resultSecondary.clear();
+                } else {
+                    try {
+                        const std::string decoded = detail::decodeBase64ToString(base64Input);
+                        detail::writeFileBinary(dstPath, decoded);
+                        resultType = ResultType::Info;
+                        resultPrimary = "Binary file written to: " + dstPath;
+                        resultSecondary = "Decoded bytes: " + std::to_string(decoded.size());
+                    } catch (const std::exception& e) {
+                        resultType = ResultType::Error;
+                        resultPrimary = std::string("Write failed: ") + e.what();
+                        resultSecondary.clear();
+                    }
+                }
+            }
+        }
+
         End();
     }
     void show_res() {
         using namespace ImGui;
         SetWindowPosSizeRatio("result", ImVec2(0.47f, 0.63f), ImVec2(0.48f, 0.34f));
         Begin("result");
-        static char result_buffer[4096] = "";
+        if (resultType == ResultType::None) {
+            Text("No result yet.");
+            End();
+            return;
+        }
+
         int wrap_column = 64;
         const float avail_width = ImGui::GetContentRegionAvail().x;
         if (avail_width > 0.0f) {
@@ -410,16 +655,62 @@ namespace Myspace {
                 }
             }
         }
-        const std::string wrapped_result = detail::wrapForDisplay(result, wrap_column);
-        snprintf(result_buffer, sizeof(result_buffer), "%s", wrapped_result.c_str());
-        if (Button("Copy result")) {
-            SetClipboardText(result.c_str());
+
+        const char* primaryLabel = "Result";
+        const char* secondaryLabel = nullptr;
+        switch (resultType) {
+        case ResultType::CiphertextBase64:
+            primaryLabel = "Ciphertext (Base64)";
+            secondaryLabel = "Ciphertext (Numbers)";
+            break;
+        case ResultType::Plaintext:
+            primaryLabel = "Plaintext";
+            secondaryLabel = "Ciphertext (Numbers)";
+            break;
+        case ResultType::Info:
+            primaryLabel = "Info";
+            if (!resultSecondary.empty()) {
+                secondaryLabel = "Details";
+            }
+            break;
+        case ResultType::Error:
+            primaryLabel = "Status";
+            break;
+        default:
+            break;
         }
-        InputTextMultiline("##ResultDisplay",
-                         result_buffer,
-                         sizeof(result_buffer),
-                         ImVec2(-FLT_MIN, ImGui::GetTextLineHeight() * 12),
-                         ImGuiInputTextFlags_ReadOnly | ImGuiInputTextFlags_NoHorizontalScroll);
+
+        static char primary_buffer[8192] = "";
+        const std::string wrapped_primary = detail::wrapForDisplay(resultPrimary, wrap_column);
+        snprintf(primary_buffer, sizeof(primary_buffer), "%s", wrapped_primary.c_str());
+
+        Text("%s:", primaryLabel);
+        SameLine();
+        if (Button("Copy##PrimaryResult")) {
+            SetClipboardText(resultPrimary.c_str());
+        }
+        InputTextMultiline("##PrimaryResult",
+                           primary_buffer,
+                           sizeof(primary_buffer),
+                           ImVec2(-FLT_MIN, ImGui::GetTextLineHeight() * 9),
+                           ImGuiInputTextFlags_ReadOnly | ImGuiInputTextFlags_NoHorizontalScroll);
+
+        if (secondaryLabel && !resultSecondary.empty()) {
+            Separator();
+            Text("%s:", secondaryLabel);
+            SameLine();
+            if (Button("Copy##SecondaryResult")) {
+                SetClipboardText(resultSecondary.c_str());
+            }
+            static char secondary_buffer[8192] = "";
+            const std::string wrapped_secondary = detail::wrapForDisplay(resultSecondary, wrap_column, true);
+            snprintf(secondary_buffer, sizeof(secondary_buffer), "%s", wrapped_secondary.c_str());
+            InputTextMultiline("##SecondaryResult",
+                               secondary_buffer,
+                               sizeof(secondary_buffer),
+                               ImVec2(-FLT_MIN, ImGui::GetTextLineHeight() * 6),
+                               ImGuiInputTextFlags_ReadOnly | ImGuiInputTextFlags_NoHorizontalScroll);
+        }
         End();
     }
 }
