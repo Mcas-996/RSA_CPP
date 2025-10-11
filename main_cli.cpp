@@ -106,7 +106,7 @@ std::vector<uint8_t> decodeBase64(const std::string& text) {
 std::string readTextFile(const std::filesystem::path& path) {
     std::ifstream input(path, std::ios::binary);
     if (!input.is_open()) {
-        throw std::runtime_error("无法打开文本文件: " + path.string());
+        throw std::runtime_error("Unable to open text file: " + path.string());
     }
     return std::string(std::istreambuf_iterator<char>(input), std::istreambuf_iterator<char>());
 }
@@ -117,7 +117,7 @@ enum class Mode {
 };
 
 const char* modeName(Mode mode) {
-    return mode == Mode::Legacy ? "传统 long long 模式" : "PEM/OpenSSL 模式";
+    return mode == Mode::Legacy ? "Legacy long long mode" : "PEM/OpenSSL mode";
 }
 
 struct LegacyState {
@@ -139,14 +139,14 @@ int readInt(const std::string& prompt, int minValue, int maxValue) {
         if (std::cin >> value) {
             std::cin.ignore(std::numeric_limits<std::streamsize>::max(), '\n');
             if (value < minValue || value > maxValue) {
-                std::cout << "输入超出范围，请输入 " << minValue << " 到 " << maxValue << " 之间的整数。\n";
+                std::cout << "Input out of range. Please enter a value between " << minValue << " and " << maxValue << ".\n";
                 continue;
             }
             return value;
         }
         std::cin.clear();
         std::cin.ignore(std::numeric_limits<std::streamsize>::max(), '\n');
-        std::cout << "输入无效，请输入数字。\n";
+        std::cout << "Invalid input; please enter a number.\n";
     }
 }
 
