@@ -196,11 +196,12 @@ int main() {
         std::cout << "8. Encrypt binary file" << std::endl;
         std::cout << "9. Decrypt Base64 ciphertext to binary" << std::endl;
         std::cout << "10. Load binary file into memory" << std::endl;
-        std::cout << "11. Encrypt file to file" << std::endl;
-        std::cout << "12. Decrypt file to file" << std::endl;
-        std::cout << "13. Exit" << std::endl;
+        std::cout << "11. Save current keys to files" << std::endl;
+        std::cout << "12. Encrypt file to file" << std::endl;
+        std::cout << "13. Decrypt file to file" << std::endl;
+        std::cout << "14. Exit" << std::endl;
 
-        const int choice = readInt("Choose an option (1-13): ", 1, 13);
+        const int choice = readInt("Choose an option (1-14): ", 1, 14);
 
         switch (choice) {
         case 1: {
@@ -472,6 +473,74 @@ int main() {
             break;
         }
         case 11: {
+            if (mode == Mode::Legacy) {
+                if (!legacy.hasKey) {
+                    std::cout << "Generate or import legacy keys first." << std::endl;
+                    break;
+                }
+                const std::string publicPath = stripSurroundingQuotes(trim(readLine("Path to save public exponent (e) [leave blank to skip]: ")));
+                const std::string privatePath = stripSurroundingQuotes(trim(readLine("Path to save private exponent (d) [leave blank to skip]: ")));
+                const std::string modulusPath = stripSurroundingQuotes(trim(readLine("Path to save modulus (n) [leave blank to skip]: ")));
+                bool savedAny = false;
+                try {
+                    if (!publicPath.empty()) {
+                        WriteStringToBinaryFile(publicPath, legacy.keyPair.publicKey);
+                        std::cout << "Saved public exponent to: " << publicPath << std::endl;
+                        savedAny = true;
+                    }
+                    if (!privatePath.empty()) {
+                        WriteStringToBinaryFile(privatePath, legacy.keyPair.privateKey);
+                        std::cout << "Saved private exponent to: " << privatePath << std::endl;
+                        savedAny = true;
+                    }
+                    if (!modulusPath.empty()) {
+                        WriteStringToBinaryFile(modulusPath, legacy.keyPair.modulus);
+                        std::cout << "Saved modulus to: " << modulusPath << std::endl;
+                        savedAny = true;
+                    }
+                    if (!savedAny) {
+                        std::cout << "No files specified; nothing saved." << std::endl;
+                    }
+                } catch (const std::exception& e) {
+                    std::cout << "Saving legacy keys failed: " << e.what() << std::endl;
+                }
+            } else {
+                if (!pem.hasPublic && !pem.hasPrivate) {
+                    std::cout << "No PEM keys loaded. Generate or import keys first." << std::endl;
+                    break;
+                }
+                const std::string publicPath = stripSurroundingQuotes(trim(readLine("Path to save public key PEM [leave blank to skip]: ")));
+                const std::string privatePath = stripSurroundingQuotes(trim(readLine("Path to save private key PEM [leave blank to skip]: ")));
+                bool savedAny = false;
+                try {
+                    if (!publicPath.empty()) {
+                        if (!pem.hasPublic) {
+                            std::cout << "Public key not loaded; skipping save." << std::endl;
+                        } else {
+                            WriteStringToBinaryFile(publicPath, pem.keyPair.publicKeyPem);
+                            std::cout << "Saved public key PEM to: " << publicPath << std::endl;
+                            savedAny = true;
+                        }
+                    }
+                    if (!privatePath.empty()) {
+                        if (!pem.hasPrivate) {
+                            std::cout << "Private key not loaded; skipping save." << std::endl;
+                        } else {
+                            WriteStringToBinaryFile(privatePath, pem.keyPair.privateKeyPem);
+                            std::cout << "Saved private key PEM to: " << privatePath << std::endl;
+                            savedAny = true;
+                        }
+                    }
+                    if (!savedAny) {
+                        std::cout << "No files specified; nothing saved." << std::endl;
+                    }
+                } catch (const std::exception& e) {
+                    std::cout << "Saving PEM keys failed: " << e.what() << std::endl;
+                }
+            }
+            break;
+        }
+        case 12: {
             if (mode == Mode::Legacy && !legacy.hasKey) {
                 std::cout << "Generate or import legacy keys first." << std::endl;
                 break;
@@ -499,7 +568,7 @@ int main() {
             }
             break;
         }
-        case 12: {
+        case 13: {
             if (mode == Mode::Legacy && !legacy.hasKey) {
                 std::cout << "Generate or import legacy keys first." << std::endl;
                 break;
@@ -527,7 +596,7 @@ int main() {
             }
             break;
         }
-        case 13: {
+        case 14: {
             std::cout << "Goodbye!" << std::endl;
             return 0;
         }
