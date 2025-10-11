@@ -254,7 +254,7 @@ namespace Myspace {
                 return decodeCiphertextBase64(cleaned);
             } catch (const std::exception&) {
                 if (isNumericCiphertext(cleaned)) {
-                    return RSA::stringToCiphertext(cleaned);
+                    return RSAUtil::stringToCiphertext(cleaned);
                 }
                 throw;
             }
@@ -295,7 +295,7 @@ namespace Myspace {
 
     static constexpr size_t KEY_BUFFER_SIZE = 512;
 
-    RSA::KeyPair KP;
+    RSAUtil::KeyPair KP;
     enum class ResultType {
         None,
         CiphertextBase64,
@@ -320,178 +320,132 @@ namespace Myspace {
         ImGui::SetNextWindowSize(size, ImGuiCond_FirstUseEver);
     }
 
-    void input_KP_window() {
+    void TraditionalRSAWindow() {
         using namespace ImGui;
-        SetWindowPosSizeRatio("RSA", ImVec2(0.01f, 0.01f), ImVec2(0.40f, 0.32f));
-        Begin("RSA");
+        SetWindowPosSizeRatio("Traditional RSA", ImVec2(0.01f, 0.02f), ImVec2(0.46f, 0.94f));
+        Begin("Traditional RSA");
 
-        // Create separate buffers for each input field
         static char public_key_buffer[KEY_BUFFER_SIZE] = "";
         static char private_key_buffer[KEY_BUFFER_SIZE] = "";
         static char mod_number_buffer[KEY_BUFFER_SIZE] = "";
         static detail::AutoWrapUserData key_wrap{ 64, false };
+        static std::string keyInputStatus;
 
-        // Display prompt text first
-        Text("Enter Public Key:");
-        // Add label to input field, using different buffers
-        InputTextMultiline("##public_key",
+        TextUnformatted("Manual Key Input");
+        Separator();
+        Text("Public Key:");
+        InputTextMultiline("##ManualPublicKey",
                            public_key_buffer,
                            KEY_BUFFER_SIZE,
-                           ImVec2(-FLT_MIN, ImGui::GetTextLineHeight() * 3),
+                           ImVec2(-FLT_MIN, GetTextLineHeight() * 3),
                            ImGuiInputTextFlags_NoHorizontalScroll | ImGuiInputTextFlags_CallbackAlways,
                            detail::AutoWrapCallback,
                            &key_wrap);
 
-        Text("Enter Private Key:");
-        InputTextMultiline("##PrivateKey",
+        Text("Private Key:");
+        InputTextMultiline("##ManualPrivateKey",
                            private_key_buffer,
                            KEY_BUFFER_SIZE,
-                           ImVec2(-FLT_MIN, ImGui::GetTextLineHeight() * 3),
+                           ImVec2(-FLT_MIN, GetTextLineHeight() * 3),
                            ImGuiInputTextFlags_NoHorizontalScroll | ImGuiInputTextFlags_CallbackAlways,
                            detail::AutoWrapCallback,
                            &key_wrap);
 
-        Text("Enter Mod Number:");
-        InputTextMultiline("##ModNumber",
+        Text("Mod Number:");
+        InputTextMultiline("##ManualModNumber",
                            mod_number_buffer,
                            KEY_BUFFER_SIZE,
-                           ImVec2(-FLT_MIN, ImGui::GetTextLineHeight() * 3),
+                           ImVec2(-FLT_MIN, GetTextLineHeight() * 3),
                            ImGuiInputTextFlags_NoHorizontalScroll | ImGuiInputTextFlags_CallbackAlways,
                            detail::AutoWrapCallback,
                            &key_wrap);
 
-        // Add conversion button (optional, more secure)
-        if (Button("Process Keys")) {
-            std::string puk = "", prk = "", modn = "";
-
-            // Convert public key
-            if (strlen(public_key_buffer) > 0) {
-                try {
-                    puk = detail::sanitizeCipherInput(public_key_buffer);
-                }
-                catch (const std::exception& e) {
-                    TextColored(ImVec4(1.0f, 0.0f, 0.0f, 1.0f), "Invalid Public Key!");
-                }
-            }
-
-            // Convert private key
-            if (strlen(private_key_buffer) > 0) {
-                try {
-                    prk = detail::sanitizeCipherInput(private_key_buffer);
-                }
-                catch (const std::exception& e) {
-                    TextColored(ImVec4(1.0f, 0.0f, 0.0f, 1.0f), "Invalid Private Key!");
-                }
-            }
-
-            // Convert modulus
-            if (strlen(mod_number_buffer) > 0) {
-                try {
-                    modn = detail::sanitizeCipherInput(mod_number_buffer);
-                }
-                catch (const std::exception& e) {
-                    TextColored(ImVec4(1.0f, 0.0f, 0.0f, 1.0f), "Invalid Mod Number!");
-                }
-            }
-
-            // Display results
-            TextWrapped("Public Key: %s", puk.c_str());
-            TextWrapped("Private Key: %s", prk.c_str());
-            TextWrapped("Mod Number: %s", modn.c_str());
-
-            // Output to console (optional)
-            std::cout << "Public Key: " << puk << " Private Key: " << prk << " Modulus: " << modn << std::endl;
-            
+        if (Button("Apply manual key pair")) {
+            const std::string puk = detail::sanitizeCipherInput(public_key_buffer);
+            const std::string prk = detail::sanitizeCipherInput(private_key_buffer);
+            const std::string modn = detail::sanitizeCipherInput(mod_number_buffer);
             KP = { puk, prk, modn };
+            keyInputStatus = "Manual key pair applied.";
+        }
+        SameLine();
+        if (Button("Generate new key pair")) {
+            KP = RSAUtil::generateKeyPair();
+            snprintf(public_key_buffer, sizeof(public_key_buffer), "%s", KP.publicKey.c_str());
+            snprintf(private_key_buffer, sizeof(private_key_buffer), "%s", KP.privateKey.c_str());
+            snprintf(mod_number_buffer, sizeof(mod_number_buffer), "%s", KP.modulus.c_str());
+            keyInputStatus = "Generated new key pair.";
+        }
+        if (!keyInputStatus.empty()) {
+            TextWrapped("Status: %s", keyInputStatus.c_str());
         }
 
-        End();
-    }
+        Separator();
+        TextUnformatted("Current Key Pair");
+        Separator();
 
-    void Generate_KP_window() {
-        SetWindowPosSizeRatio("Generate", ImVec2(0.01f, 0.34f), ImVec2(0.25f, 0.14f));
-        ImGui::Begin("Generate");
-        if (ImGui::Button("generate a new key")) {
-            KP = RSA::generateKeyPair();
-        }
-        ImGui::End();
-    }
+        const std::string wrapped_public = detail::wrapForDisplay(KP.publicKey, 64);
+        const std::string wrapped_private = detail::wrapForDisplay(KP.privateKey, 64);
+        const std::string wrapped_mod = detail::wrapForDisplay(KP.modulus, 64);
 
-    void Show_KP_window() {
-        SetWindowPosSizeRatio("Key", ImVec2(0.01f, 0.50f), ImVec2(0.45f, 0.40f));
-        ImGui::Begin("Key");
-        // String variables
-        std::string public_key = KP.publicKey;
-        std::string private_key = KP.privateKey;
-        std::string mod_number = KP.modulus;
-
-        // Corresponding character buffers
         static char public_key_str[KEY_BUFFER_SIZE] = "";
         static char private_key_str[KEY_BUFFER_SIZE] = "";
         static char mod_number_str[KEY_BUFFER_SIZE] = "";
-
-        // Convert strings to character arrays
-        const std::string wrapped_public = detail::wrapForDisplay(public_key, 64);
-        const std::string wrapped_private = detail::wrapForDisplay(private_key, 64);
-        const std::string wrapped_mod = detail::wrapForDisplay(mod_number, 64);
 
         snprintf(public_key_str, sizeof(public_key_str), "%s", wrapped_public.c_str());
         snprintf(private_key_str, sizeof(private_key_str), "%s", wrapped_private.c_str());
         snprintf(mod_number_str, sizeof(mod_number_str), "%s", wrapped_mod.c_str());
 
-        // Display using read-only input fields
-        ImGui::Text("Public Key:");
-        ImGui::InputTextMultiline("##PublicKeyDisplay",
-            public_key_str, sizeof(public_key_str),
-            ImVec2(-FLT_MIN, ImGui::GetTextLineHeight() * 5),
-            ImGuiInputTextFlags_ReadOnly | ImGuiInputTextFlags_NoHorizontalScroll);
+        Text("Public Key:");
+        InputTextMultiline("##DisplayPublicKey",
+                           public_key_str,
+                           sizeof(public_key_str),
+                           ImVec2(-FLT_MIN, GetTextLineHeight() * 5),
+                           ImGuiInputTextFlags_ReadOnly | ImGuiInputTextFlags_NoHorizontalScroll);
 
-        ImGui::Text("Private Key:");
-        ImGui::InputTextMultiline("##PrivateKeyDisplay",
-            private_key_str, sizeof(private_key_str),
-            ImVec2(-FLT_MIN, ImGui::GetTextLineHeight() * 5),
-            ImGuiInputTextFlags_ReadOnly | ImGuiInputTextFlags_NoHorizontalScroll);
+        Text("Private Key:");
+        InputTextMultiline("##DisplayPrivateKey",
+                           private_key_str,
+                           sizeof(private_key_str),
+                           ImVec2(-FLT_MIN, GetTextLineHeight() * 5),
+                           ImGuiInputTextFlags_ReadOnly | ImGuiInputTextFlags_NoHorizontalScroll);
 
-        ImGui::Text("Mod Number:");
-        ImGui::InputTextMultiline("##ModNumberDisplay",
-            mod_number_str, sizeof(mod_number_str),
-            ImVec2(-FLT_MIN, ImGui::GetTextLineHeight() * 5),
-            ImGuiInputTextFlags_ReadOnly | ImGuiInputTextFlags_NoHorizontalScroll);
+        Text("Mod Number:");
+        InputTextMultiline("##DisplayModNumber",
+                           mod_number_str,
+                           sizeof(mod_number_str),
+                           ImVec2(-FLT_MIN, GetTextLineHeight() * 5),
+                           ImGuiInputTextFlags_ReadOnly | ImGuiInputTextFlags_NoHorizontalScroll);
 
-        ImGui::End();
-    }
-
-    void enpt() {
-        using namespace ImGui;
-        SetWindowPosSizeRatio("encrypt", ImVec2(0.47f, 0.01f), ImVec2(0.48f, 0.30f));
-        Begin("encrypt");
-        static std::string buffer;
-        if (buffer.capacity() < 262144) {
-            buffer.reserve(262144);
+        Separator();
+        TextUnformatted("Encryption");
+        Separator();
+        static std::string encrypt_buffer;
+        if (encrypt_buffer.capacity() < 262144) {
+            encrypt_buffer.reserve(262144);
         }
-        Text("text:");
+        Text("Plaintext:");
         SameLine();
-        if (Button("Get from result##encrypt")) {
-            buffer = resultPrimary;
+        if (Button("Get from result##TraditionalEncrypt")) {
+            encrypt_buffer = resultPrimary;
         }
         static detail::AutoWrapUserData plaintext_wrap{ 64, false };
-        detail::InputTextMultilineString("##text_input",
-                                         buffer,
-                                         ImVec2(-FLT_MIN, ImGui::GetTextLineHeight() * 8),
+        detail::InputTextMultilineString("##TraditionalEncryptInput",
+                                         encrypt_buffer,
+                                         ImVec2(-FLT_MIN, GetTextLineHeight() * 8),
                                          ImGuiInputTextFlags_NoHorizontalScroll | ImGuiInputTextFlags_CallbackAlways,
                                          detail::AutoWrapCallback,
                                          &plaintext_wrap);
-        Text("length: %zu\n", buffer.size());
-        if (Button("encrypt")) {
+        Text("Length: %zu", encrypt_buffer.size());
+        if (Button("Encrypt##Traditional")) {
             if (KP.publicKey.empty() || KP.privateKey.empty() || KP.modulus.empty()) {
                 resultPrimary = "Encrypt failed: please generate or input a key pair first.";
                 resultSecondary.clear();
                 resultType = ResultType::Error;
             } else {
                 try {
-                    std::vector<long long> res = RSA::encryptText(buffer, KP);
+                    const std::vector<long long> res = RSAUtil::encryptText(encrypt_buffer, KP);
                     resultPrimary = detail::encodeCiphertextBase64(res);
-                    resultSecondary = RSA::ciphertextToString(res);
+                    resultSecondary = RSAUtil::ciphertextToString(res);
                     resultType = ResultType::CiphertextBase64;
                 } catch (const std::exception& e) {
                     resultPrimary = std::string("Encrypt failed: ") + e.what();
@@ -501,41 +455,39 @@ namespace Myspace {
                 }
             }
         }
-        End();
-    }
-    void dept() {
-        using namespace ImGui;
-        SetWindowPosSizeRatio("descrypt", ImVec2(0.47f, 0.32f), ImVec2(0.48f, 0.30f));
-        Begin("descrypt");
-        static std::string buffer;
-        if (buffer.capacity() < 262144) {
-            buffer.reserve(262144);
+
+        Separator();
+        TextUnformatted("Decryption");
+        Separator();
+        static std::string decrypt_buffer;
+        if (decrypt_buffer.capacity() < 262144) {
+            decrypt_buffer.reserve(262144);
         }
         static detail::AutoWrapUserData cipher_wrap{ 64, true };
-        Text("text:");
+        Text("Ciphertext:");
         SameLine();
-        if (Button("Get from result##decrypt")) {
-            buffer = resultPrimary;
+        if (Button("Get from result##TraditionalDecrypt")) {
+            decrypt_buffer = resultPrimary;
         }
-        detail::InputTextMultilineString("##decrypt_text",
-                                         buffer,
-                                         ImVec2(-FLT_MIN, ImGui::GetTextLineHeight() * 8),
+        detail::InputTextMultilineString("##TraditionalDecryptInput",
+                                         decrypt_buffer,
+                                         ImVec2(-FLT_MIN, GetTextLineHeight() * 8),
                                          ImGuiInputTextFlags_NoHorizontalScroll | ImGuiInputTextFlags_CallbackAlways,
                                          detail::AutoWrapCallback,
                                          &cipher_wrap);
-        Text("length: %zu\n", buffer.size());
-        if (Button("decrypt")) {
+        Text("Length: %zu", decrypt_buffer.size());
+        if (Button("Decrypt##Traditional")) {
             if (KP.publicKey.empty() || KP.privateKey.empty() || KP.modulus.empty()) {
                 resultPrimary = "Decrypt failed: please generate or input a key pair first.";
                 resultSecondary.clear();
                 resultType = ResultType::Error;
             } else {
                 try {
-                    const std::string cleaned = detail::sanitizeCipherInput(buffer.c_str());
+                    const std::string cleaned = detail::sanitizeCipherInput(decrypt_buffer.c_str());
                     const std::vector<long long> ciphertext = detail::parseCiphertext(cleaned);
-                    const std::string decrypted = RSA::decryptText(ciphertext, KP);
+                    const std::string decrypted = RSAUtil::decryptText(ciphertext, KP);
                     resultPrimary = decrypted;
-                    resultSecondary = RSA::ciphertextToString(ciphertext);
+                    resultSecondary = RSAUtil::ciphertextToString(ciphertext);
                     resultType = ResultType::Plaintext;
                 } catch (const std::exception& e) {
                     resultPrimary = std::string("Decrypt failed: ") + e.what();
@@ -545,15 +497,10 @@ namespace Myspace {
                 }
             }
         }
-       
-        End();
-    }
-    void file_window() {
-        using namespace ImGui;
-        SetWindowPosSizeRatio("File I/O", ImVec2(0.01f, 0.75f), ImVec2(0.45f, 0.23f));
-        Begin("File I/O");
-        TextWrapped("Base64 helper (no RSA). Convert binary files to Base64 text and back for transport or inspection.");
 
+        Separator();
+        TextUnformatted("Base64 Helper");
+        Separator();
         static char convert_path[512] = "";
         static char dest_path[512] = "";
         static detail::AutoWrapUserData base64_wrap{ 64, false };
@@ -565,25 +512,25 @@ namespace Myspace {
         InputText("Binary file path", convert_path, IM_ARRAYSIZE(convert_path));
         InputText("Target file path", dest_path, IM_ARRAYSIZE(dest_path));
         static bool enableWrap = true;
-        ImGui::Checkbox("Auto-wrap buffer", &enableWrap);
+        Checkbox("Auto-wrap buffer", &enableWrap);
         ImGuiInputTextFlags bufferFlags = enableWrap ? ImGuiInputTextFlags_CallbackAlways : ImGuiInputTextFlags_None;
         SameLine();
-        if (Button("Get from result##buffer")) {
+        if (Button("Get from result##Base64Buffer")) {
             base64_buffer = resultPrimary;
         }
         detail::InputTextMultilineString("Base64 buffer",
                                          base64_buffer,
-                                         ImVec2(-FLT_MIN, ImGui::GetTextLineHeight() * 5),
+                                         ImVec2(-FLT_MIN, GetTextLineHeight() * 5),
                                          bufferFlags,
                                          enableWrap ? detail::AutoWrapCallback : nullptr,
                                          enableWrap ? static_cast<void*>(&base64_wrap) : nullptr);
         Text("Buffer length: %zu", base64_buffer.size());
         SameLine();
-        if (Button("Copy buffer")) {
+        if (Button("Copy buffer##Traditional")) {
             SetClipboardText(base64_buffer.c_str());
         }
 
-        if (Button("Load file -> Base64 buffer")) {
+        if (Button("Load file -> buffer##Traditional")) {
             const std::string srcPath = detail::normalizePath(convert_path);
             if (srcPath.empty()) {
                 resultType = ResultType::Error;
@@ -604,7 +551,7 @@ namespace Myspace {
             }
         }
         SameLine();
-        if (Button("Save buffer -> file")) {
+        if (Button("Save buffer -> file##Traditional")) {
             const std::string dstPath = detail::normalizePath(dest_path);
             if (dstPath.empty()) {
                 resultType = ResultType::Error;
@@ -632,85 +579,104 @@ namespace Myspace {
             }
         }
 
-        End();
-    }
-    void show_res() {
-        using namespace ImGui;
-        SetWindowPosSizeRatio("result", ImVec2(0.47f, 0.63f), ImVec2(0.48f, 0.34f));
-        Begin("result");
+        Separator();
+        TextUnformatted("Result Viewer");
+        Separator();
         if (resultType == ResultType::None) {
             Text("No result yet.");
-            End();
-            return;
-        }
-
-        int wrap_column = 64;
-        const float avail_width = ImGui::GetContentRegionAvail().x;
-        if (avail_width > 0.0f) {
-            const float char_width = ImGui::CalcTextSize("M").x;
-            if (char_width > 0.0f) {
-                wrap_column = static_cast<int>(avail_width / char_width);
-                if (wrap_column < 1) {
-                    wrap_column = 1;
+        } else {
+            int wrap_column = 64;
+            const float avail_width = GetContentRegionAvail().x;
+            if (avail_width > 0.0f) {
+                const float char_width = CalcTextSize("M").x;
+                if (char_width > 0.0f) {
+                    wrap_column = static_cast<int>(avail_width / char_width);
+                    if (wrap_column < 1) {
+                        wrap_column = 1;
+                    }
                 }
             }
-        }
 
-        const char* primaryLabel = "Result";
-        const char* secondaryLabel = nullptr;
-        switch (resultType) {
-        case ResultType::CiphertextBase64:
-            primaryLabel = "Ciphertext (Base64)";
-            secondaryLabel = "Ciphertext (Numbers)";
-            break;
-        case ResultType::Plaintext:
-            primaryLabel = "Plaintext";
-            secondaryLabel = "Ciphertext (Numbers)";
-            break;
-        case ResultType::Info:
-            primaryLabel = "Info";
-            if (!resultSecondary.empty()) {
-                secondaryLabel = "Details";
+            const char* primaryLabel = "Result";
+            const char* secondaryLabel = nullptr;
+            switch (resultType) {
+            case ResultType::CiphertextBase64:
+                primaryLabel = "Ciphertext (Base64)";
+                secondaryLabel = "Ciphertext (Numbers)";
+                break;
+            case ResultType::Plaintext:
+                primaryLabel = "Plaintext";
+                secondaryLabel = "Ciphertext (Numbers)";
+                break;
+            case ResultType::Info:
+                primaryLabel = "Info";
+                if (!resultSecondary.empty()) {
+                    secondaryLabel = "Details";
+                }
+                break;
+            case ResultType::Error:
+                primaryLabel = "Status";
+                break;
+            default:
+                break;
             }
-            break;
-        case ResultType::Error:
-            primaryLabel = "Status";
-            break;
-        default:
-            break;
+
+            static char primary_buffer[8192] = "";
+            const std::string wrapped_primary = detail::wrapForDisplay(resultPrimary, wrap_column);
+            snprintf(primary_buffer, sizeof(primary_buffer), "%s", wrapped_primary.c_str());
+
+            Text("%s:", primaryLabel);
+            SameLine();
+            if (Button("Copy##TraditionalPrimaryResult")) {
+                SetClipboardText(resultPrimary.c_str());
+            }
+            InputTextMultiline("##TraditionalPrimaryResult",
+                               primary_buffer,
+                               sizeof(primary_buffer),
+                               ImVec2(-FLT_MIN, GetTextLineHeight() * 9),
+                               ImGuiInputTextFlags_ReadOnly | ImGuiInputTextFlags_NoHorizontalScroll);
+
+            if (secondaryLabel && !resultSecondary.empty()) {
+                Separator();
+                Text("%s:", secondaryLabel);
+                SameLine();
+                if (Button("Copy##TraditionalSecondaryResult")) {
+                    SetClipboardText(resultSecondary.c_str());
+                }
+                static char secondary_buffer[8192] = "";
+                const std::string wrapped_secondary = detail::wrapForDisplay(resultSecondary, wrap_column, true);
+                snprintf(secondary_buffer, sizeof(secondary_buffer), "%s", wrapped_secondary.c_str());
+                InputTextMultiline("##TraditionalSecondaryResult",
+                                   secondary_buffer,
+                                   sizeof(secondary_buffer),
+                                   ImVec2(-FLT_MIN, GetTextLineHeight() * 6),
+                                   ImGuiInputTextFlags_ReadOnly | ImGuiInputTextFlags_NoHorizontalScroll);
+            }
         }
 
-        static char primary_buffer[8192] = "";
-        const std::string wrapped_primary = detail::wrapForDisplay(resultPrimary, wrap_column);
-        snprintf(primary_buffer, sizeof(primary_buffer), "%s", wrapped_primary.c_str());
+        End();
+    }
 
-        Text("%s:", primaryLabel);
+    void GlobalResultWindow() {
+        using namespace ImGui;
+        SetWindowPosSizeRatio("Result", ImVec2(0.52f, 0.70f), ImVec2(0.45f, 0.26f));
+        Begin("Result");
+
+        TextUnformatted("Latest result output");
         SameLine();
-        if (Button("Copy##PrimaryResult")) {
+        if (Button("Copy##GlobalResult")) {
             SetClipboardText(resultPrimary.c_str());
         }
-        InputTextMultiline("##PrimaryResult",
-                           primary_buffer,
-                           sizeof(primary_buffer),
-                           ImVec2(-FLT_MIN, ImGui::GetTextLineHeight() * 9),
+
+        static char global_result_buffer[8192] = "";
+        const std::string wrapped = detail::wrapForDisplay(resultPrimary, 72);
+        snprintf(global_result_buffer, sizeof(global_result_buffer), "%s", wrapped.c_str());
+        InputTextMultiline("##GlobalResultOutput",
+                           global_result_buffer,
+                           sizeof(global_result_buffer),
+                           ImVec2(-FLT_MIN, GetTextLineHeight() * 8),
                            ImGuiInputTextFlags_ReadOnly | ImGuiInputTextFlags_NoHorizontalScroll);
 
-        if (secondaryLabel && !resultSecondary.empty()) {
-            Separator();
-            Text("%s:", secondaryLabel);
-            SameLine();
-            if (Button("Copy##SecondaryResult")) {
-                SetClipboardText(resultSecondary.c_str());
-            }
-            static char secondary_buffer[8192] = "";
-            const std::string wrapped_secondary = detail::wrapForDisplay(resultSecondary, wrap_column, true);
-            snprintf(secondary_buffer, sizeof(secondary_buffer), "%s", wrapped_secondary.c_str());
-            InputTextMultiline("##SecondaryResult",
-                               secondary_buffer,
-                               sizeof(secondary_buffer),
-                               ImVec2(-FLT_MIN, ImGui::GetTextLineHeight() * 6),
-                               ImGuiInputTextFlags_ReadOnly | ImGuiInputTextFlags_NoHorizontalScroll);
-        }
         End();
     }
 }

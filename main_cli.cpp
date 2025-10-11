@@ -1,15 +1,24 @@
 #include "RSA.hpp"
 #include "bin.hpp"
 #include "third_party/cppcodec/cppcodec/base64_rfc4648.hpp"
+
+#include <algorithm>
 #include <cctype>
 #include <cstdint>
+#include <filesystem>
+#include <fstream>
 #include <iostream>
+#include <limits>
 #include <stdexcept>
 #include <string>
 #include <vector>
 
 namespace {
+
 std::string encodeCiphertextBase64(const std::vector<long long>& values) {
+    if (values.empty()) {
+        return {};
+    }
     std::vector<uint8_t> bytes;
     bytes.reserve(values.size() * sizeof(uint64_t));
     for (long long value : values) {
@@ -55,6 +64,19 @@ bool isNumericCiphertext(const std::string& input) {
     return input.find_first_not_of("0123456789,-") == std::string::npos;
 }
 
+std::string trim(const std::string& input) {
+    const auto begin = std::find_if_not(input.begin(), input.end(), [](unsigned char c) {
+        return std::isspace(c);
+    });
+    const auto end = std::find_if_not(input.rbegin(), input.rend(), [](unsigned char c) {
+        return std::isspace(c);
+    }).base();
+    if (begin >= end) {
+        return {};
+    }
+    return std::string(begin, end);
+}
+
 std::vector<long long> parseCiphertext(const std::string& input) {
     const std::string cleaned = stripWhitespace(input);
     if (cleaned.empty()) {
@@ -64,237 +86,384 @@ std::vector<long long> parseCiphertext(const std::string& input) {
         return decodeCiphertextBase64(cleaned);
     } catch (const std::exception&) {
         if (isNumericCiphertext(cleaned)) {
-            return RSA::stringToCiphertext(cleaned);
+            return RSAUtil::stringToCiphertext(cleaned);
         }
         throw;
     }
 }
+
+std::string encodeBase64(const std::vector<uint8_t>& data) {
+    if (data.empty()) {
+        return {};
+    }
+    return cppcodec::base64_rfc4648::encode(data);
+}
+
+std::vector<uint8_t> decodeBase64(const std::string& text) {
+    return cppcodec::base64_rfc4648::decode(stripWhitespace(text));
+}
+
+std::string readTextFile(const std::filesystem::path& path) {
+    std::ifstream input(path, std::ios::binary);
+    if (!input.is_open()) {
+        throw std::runtime_error("无法打开文本文件: " + path.string());
+    }
+    return std::string(std::istreambuf_iterator<char>(input), std::istreambuf_iterator<char>());
+}
+
+enum class Mode {
+    Legacy = 0,
+    Pem = 1
+};
+
+const char* modeName(Mode mode) {
+    return mode == Mode::Legacy ? "传统 long long 模式" : "PEM/OpenSSL 模式";
+}
+
+struct LegacyState {
+    RSAUtil::KeyPair keyPair{};
+    bool hasKey = false;
+};
+
+struct PemState {
+    RSAUtil::PemKeyPair keyPair{};
+    bool hasPublic = false;
+    bool hasPrivate = false;
+    int keyBits = 2048;
+};
+
+int readInt(const std::string& prompt, int minValue, int maxValue) {
+    while (true) {
+        std::cout << prompt;
+        int value;
+        if (std::cin >> value) {
+            std::cin.ignore(std::numeric_limits<std::streamsize>::max(), '\n');
+            if (value < minValue || value > maxValue) {
+                std::cout << "输入超出范围，请输入 " << minValue << " 到 " << maxValue << " 之间的整数。\n";
+                continue;
+            }
+            return value;
+        }
+        std::cin.clear();
+        std::cin.ignore(std::numeric_limits<std::streamsize>::max(), '\n');
+        std::cout << "输入无效，请输入数字。\n";
+    }
+}
+
+std::string readLine(const std::string& prompt) {
+    std::cout << prompt;
+    std::string line;
+    std::getline(std::cin, line);
+    return line;
+}
+
+void printSeparator() {
+    std::cout << "----------------------------------------" << std::endl;
+}
+
 } // namespace
 
 int main() {
     std::cout << "RSA Encryption/Decryption CLI Tool" << std::endl;
     std::cout << "===================================" << std::endl;
 
-    RSA::KeyPair keyPair;
-    bool hasKeyPair = false;
+    LegacyState legacy;
+    PemState pem;
+    Mode mode = Mode::Pem;
     std::string result;
 
     while (true) {
-        std::cout << "\nOptions:" << std::endl;
-        std::cout << "1. Generate new key pair" << std::endl;
-        std::cout << "2. Input existing key pair" << std::endl;
-        std::cout << "3. Show current key pair" << std::endl;
-        std::cout << "4. Encrypt text" << std::endl;
-        std::cout << "5. Decrypt text" << std::endl;
-        std::cout << "6. Save string to binary file" << std::endl;
-        std::cout << "7. Encrypt binary file" << std::endl;
-        std::cout << "8. Decrypt Base64 ciphertext to binary string" << std::endl;
-        std::cout << "9. Load binary file into string" << std::endl;
-        std::cout << "10. Exit" << std::endl;
-        std::cout << "Choose an option (1-10): ";
+        printSeparator();
+        std::cout << "Current mode: " << modeName(mode) << std::endl;
+        std::cout << "1. Switch mode" << std::endl;
+        std::cout << "2. Generate key pair (current mode)" << std::endl;
+        std::cout << "3. Import keys" << std::endl;
+        std::cout << "4. Show current keys" << std::endl;
+        std::cout << "5. Encrypt text" << std::endl;
+        std::cout << "6. Decrypt text" << std::endl;
+        std::cout << "7. Save string to binary file" << std::endl;
+        std::cout << "8. Encrypt binary file" << std::endl;
+        std::cout << "9. Decrypt Base64 ciphertext to binary" << std::endl;
+        std::cout << "10. Load binary file into memory" << std::endl;
+        std::cout << "11. Exit" << std::endl;
 
-        int choice;
-        std::cin >> choice;
-        std::cin.ignore(); // Clear newline character
+        const int choice = readInt("Choose an option (1-11): ", 1, 11);
 
         switch (choice) {
         case 1: {
-            std::cout << "Generating new key pair..." << std::endl;
-            keyPair = RSA::generateKeyPair();
-            hasKeyPair = true;
-            RSA::printKeyInfo(keyPair);
+            mode = (mode == Mode::Legacy) ? Mode::Pem : Mode::Legacy;
+            std::cout << "Switched to " << modeName(mode) << std::endl;
             break;
         }
         case 2: {
-            if (!hasKeyPair) {
-                keyPair = RSA::KeyPair();
+            if (mode == Mode::Legacy) {
+                legacy.keyPair = RSAUtil::generateKeyPair();
+                legacy.hasKey = true;
+                std::cout << "Generated legacy key pair." << std::endl;
+                RSAUtil::printKeyInfo(legacy.keyPair);
+            } else {
+                std::string bitsInput = stripWhitespace(readLine("Enter key size in bits (>=512, default " + std::to_string(pem.keyBits) + "): "));
+                int bits = pem.keyBits;
+                if (!bitsInput.empty()) {
+                    try {
+                        bits = std::stoi(bitsInput);
+                    } catch (const std::exception&) {
+                        std::cout << "Invalid number, using default " << bits << " bits." << std::endl;
+                    }
+                }
+                bits = std::clamp(bits, 512, 16384);
+                try {
+                    pem.keyPair = RSAUtil::generatePemKeyPair(bits);
+                    pem.hasPublic = true;
+                    pem.hasPrivate = true;
+                    pem.keyBits = pem.keyPair.keyBits;
+                    std::cout << "Generated PEM key pair, " << pem.keyPair.keyBits << " bits." << std::endl;
+                } catch (const std::exception& e) {
+                    std::cout << "Key generation failed: " << e.what() << std::endl;
+                }
             }
-            
-            std::cout << "Enter public key (e): ";
-            std::getline(std::cin, keyPair.publicKey);
-            
-            std::cout << "Enter private key (d): ";
-            std::getline(std::cin, keyPair.privateKey);
-            
-            std::cout << "Enter modulus (n): ";
-            std::getline(std::cin, keyPair.modulus);
-            
-            std::cin.ignore(); // 清除输入缓冲区中的换行符
-            hasKeyPair = true;
-            std::cout << "Key pair has been set." << std::endl;
             break;
         }
         case 3: {
-            if (hasKeyPair) {
-                RSA::printKeyInfo(keyPair);
+            if (mode == Mode::Legacy) {
+                if (!legacy.hasKey) {
+                    legacy.keyPair = RSAUtil::KeyPair();
+                }
+                legacy.keyPair.publicKey = stripWhitespace(readLine("Enter public exponent (e): "));
+                legacy.keyPair.privateKey = stripWhitespace(readLine("Enter private exponent (d): "));
+                legacy.keyPair.modulus = stripWhitespace(readLine("Enter modulus (n): "));
+                legacy.hasKey = true;
+                std::cout << "Legacy key stored." << std::endl;
             } else {
-                std::cout << "No key pair has been generated or entered yet." << std::endl;
+                try {
+                    std::string publicPath = trim(readLine("Enter public key PEM path: "));
+                    if (publicPath.empty()) {
+                        throw std::runtime_error("Public key path may not be empty");
+                    }
+                    const std::string publicPem = readTextFile(publicPath);
+                    std::string privatePath = trim(readLine("Enter private key PEM path (optional, needed for decrypt): "));
+                    std::string privatePem;
+                    if (!privatePath.empty()) {
+                        privatePem = readTextFile(privatePath);
+                    }
+                    pem.keyPair.publicKeyPem = publicPem;
+                    pem.keyPair.privateKeyPem = privatePem;
+                    try {
+                        pem.keyPair.keyBits = RSAUtil::getKeyBitsFromPublicKey(publicPem);
+                        pem.keyBits = pem.keyPair.keyBits;
+                    } catch (const std::exception&) {
+                        pem.keyPair.keyBits = 0;
+                    }
+                    pem.hasPublic = !publicPem.empty();
+                    pem.hasPrivate = !privatePem.empty();
+                    if (pem.hasPublic) {
+                        std::cout << "Loaded public key." << std::endl;
+                    }
+                    if (pem.hasPrivate) {
+                        std::cout << "Loaded private key." << std::endl;
+                    } else {
+                        std::cout << "Private key missing; only encryption is available." << std::endl;
+                    }
+                } catch (const std::exception& e) {
+                    std::cout << "Failed to load key: " << e.what() << std::endl;
+                }
             }
             break;
         }
         case 4: {
-            if (!hasKeyPair) {
-                std::cout << "Please generate or input a key pair first." << std::endl;
-                break;
-            }
-            
-            std::cout << "Enter text to encrypt: ";
-            std::string plaintext;
-            std::getline(std::cin, plaintext);
-            
-            std::cout << "Text to encrypt: \"" << plaintext << "\" (length: " << plaintext.length() << ")" << std::endl;
-            
-            try {
-                std::vector<long long> encrypted = RSA::encryptText(plaintext, keyPair);
-                std::cout << "Encrypted numbers: ";
-                for (size_t i = 0; i < encrypted.size(); ++i) {
-                    std::cout << encrypted[i];
-                    if (i < encrypted.size() - 1) std::cout << ", ";
+            if (mode == Mode::Legacy) {
+                if (legacy.hasKey) {
+                    RSAUtil::printKeyInfo(legacy.keyPair);
+                } else {
+                    std::cout << "Legacy key not set." << std::endl;
                 }
-                std::cout << std::endl;
-                
-                result = encodeCiphertextBase64(encrypted);
-                std::cout << "Encrypted Base64: " << result << std::endl;
-            } catch (const std::exception& e) {
-                std::cout << "Encryption failed: " << e.what() << std::endl;
+            } else {
+                if (!pem.hasPublic && !pem.hasPrivate) {
+                    std::cout << "No PEM keys loaded." << std::endl;
+                } else {
+                    if (pem.keyPair.keyBits > 0) {
+                        std::cout << "Key length: " << pem.keyPair.keyBits << " bits" << std::endl;
+                    }
+                    if (pem.hasPublic) {
+                        std::cout << "\n--- Public key PEM ---\n" << pem.keyPair.publicKeyPem << std::endl;
+                    }
+                    if (pem.hasPrivate) {
+                        std::cout << "\n--- Private key PEM ---\n" << pem.keyPair.privateKeyPem << std::endl;
+                    }
+                }
             }
             break;
         }
         case 5: {
-            if (!hasKeyPair) {
-                std::cout << "Please generate or input a key pair first." << std::endl;
-                break;
-            }
-            
-            std::cout << "Enter Base64 ciphertext (or comma-separated numbers): ";
-            std::string ciphertextInput;
-            std::getline(std::cin, ciphertextInput);
-            
-            std::cout << "Text to decrypt: \"" << ciphertextInput << "\"" << std::endl;
-            
-            try {
-                std::vector<long long> encrypted = parseCiphertext(ciphertextInput);
-                std::cout << "Numbers to decrypt: ";
-                for (size_t i = 0; i < encrypted.size(); ++i) {
-                    std::cout << encrypted[i];
-                    if (i < encrypted.size() - 1) std::cout << ", ";
+            if (mode == Mode::Legacy) {
+                if (!legacy.hasKey) {
+                    std::cout << "Generate or import legacy keys first." << std::endl;
+                    break;
                 }
-                std::cout << std::endl;
-                
-                std::string decrypted = RSA::decryptText(encrypted, keyPair);
-                std::cout << "Decrypted text: \"" << decrypted << "\"" << std::endl;
+                const std::string plaintext = readLine("Text to encrypt: ");
+                try {
+                    std::vector<long long> encrypted = RSAUtil::encryptText(plaintext, legacy.keyPair);
+                    result = encodeCiphertextBase64(encrypted);
+                    std::cout << "Encryption complete. Base64 ciphertext:\n" << result << std::endl;
+                } catch (const std::exception& e) {
+                    std::cout << "Encryption failed: " << e.what() << std::endl;
+                }
+            } else {
+                if (!pem.hasPublic) {
+                    std::cout << "Load or generate a PEM public key first." << std::endl;
+                    break;
+                }
+                const std::string plaintext = readLine("Text to encrypt: ");
+                try {
+                    const std::vector<uint8_t> encrypted = RSAUtil::encryptTextToBytes(plaintext, pem.keyPair);
+                    result = encodeBase64(encrypted);
+                    std::cout << "Encryption complete. Base64 ciphertext:\n" << result << std::endl;
+                } catch (const std::exception& e) {
+                    std::cout << "Encryption failed: " << e.what() << std::endl;
+                }
+            }
+            break;
+        }
+        case 6: {
+            if (mode == Mode::Legacy) {
+                if (!legacy.hasKey) {
+                    std::cout << "Generate or import legacy keys first." << std::endl;
+                    break;
+                }
+                std::string ciphertextInput = readLine("Enter Base64 ciphertext or comma-separated numbers: ");
+                try {
+                    const std::vector<long long> encrypted = parseCiphertext(ciphertextInput);
+                    const std::string decrypted = RSAUtil::decryptText(encrypted, legacy.keyPair);
+                    result = decrypted;
+                    std::cout << "Decrypted text: \"" << decrypted << "\"" << std::endl;
+                } catch (const std::exception& e) {
+                    std::cout << "Decryption failed: " << e.what() << std::endl;
+                }
+            } else {
+                if (!pem.hasPrivate) {
+                    std::cout << "Private key not loaded; cannot decrypt." << std::endl;
+                    break;
+                }
+                const std::string ciphertext = readLine("Enter Base64 ciphertext: ");
+                try {
+                    const std::vector<uint8_t> bytes = decodeBase64(ciphertext);
+                    const std::string decrypted = RSAUtil::decryptTextFromBytes(bytes, pem.keyPair);
+                    result = decrypted;
+                    std::cout << "Decryption complete. Plaintext:\n" << decrypted << std::endl;
+                } catch (const std::exception& e) {
+                    std::cout << "Decryption failed: " << e.what() << std::endl;
+                }
+            }
+            break;
+        }
+        case 7: {
+            std::string dataToSave = readLine("String to save (leave empty to reuse last result): ");
+            if (dataToSave.empty()) {
+                if (result.empty()) {
+                    std::cout << "Nothing to save." << std::endl;
+                    break;
+                }
+                dataToSave = result;
+                std::cout << "Using last result." << std::endl;
+            }
+            const std::string targetPath = trim(readLine("Target file path: "));
+            try {
+                WriteStringToBinaryFile(targetPath, dataToSave);
+                std::cout << "Saved to: " << targetPath << std::endl;
+            } catch (const std::exception& e) {
+                std::cout << "Save failed: " << e.what() << std::endl;
+            }
+            break;
+        }
+        case 8: {
+            const std::string sourcePath = trim(readLine("Source binary file path: "));
+            try {
+                const std::string binaryData = ReadBinaryFileToString(sourcePath);
+                if (mode == Mode::Legacy) {
+                    if (!legacy.hasKey) {
+                        std::cout << "Generate or import legacy keys first." << std::endl;
+                        break;
+                    }
+                    const std::vector<long long> encrypted = RSAUtil::encryptText(binaryData, legacy.keyPair);
+                    result = encodeCiphertextBase64(encrypted);
+                } else {
+                    if (!pem.hasPublic) {
+                        std::cout << "Load or generate a PEM public key first." << std::endl;
+                        break;
+                    }
+                    const std::vector<uint8_t> plainBytes(binaryData.begin(), binaryData.end());
+                    const std::vector<uint8_t> encrypted = RSAUtil::encryptBytes(plainBytes, pem.keyPair);
+                    result = encodeBase64(encrypted);
+                }
+                std::cout << "Encryption complete. Base64 ciphertext:\n" << result << std::endl;
+            } catch (const std::exception& e) {
+                std::cout << "File encryption failed: " << e.what() << std::endl;
+            }
+            break;
+        }
+        case 9: {
+            const std::string ciphertextInput = readLine("Enter Base64 ciphertext (whitespace ignored): ");
+            try {
+                if (mode == Mode::Legacy) {
+                    if (!legacy.hasKey) {
+                        std::cout << "Generate or import legacy keys first." << std::endl;
+                        break;
+                    }
+                    const std::vector<long long> encrypted = parseCiphertext(ciphertextInput);
+                    const std::string decrypted = RSAUtil::decryptText(encrypted, legacy.keyPair);
+                    result = decrypted;
+                    std::cout << "Decryption complete." << std::endl;
+                } else {
+                    if (!pem.hasPrivate) {
+                        std::cout << "Private key not loaded; cannot decrypt." << std::endl;
+                        break;
+                    }
+                    const std::vector<uint8_t> cipherBytes = decodeBase64(ciphertextInput);
+                    const std::vector<uint8_t> plainBytes = RSAUtil::decryptBytes(cipherBytes, pem.keyPair);
+                    result.assign(plainBytes.begin(), plainBytes.end());
+                    std::cout << "Decryption complete. Use option 7 to save the data." << std::endl;
+                    if (!plainBytes.empty()) {
+                        const size_t previewLen = std::min<size_t>(plainBytes.size(), 32);
+                        const std::string preview = cppcodec::base64_rfc4648::encode(plainBytes.data(), previewLen);
+                        std::cout << "Base64 preview (first " << previewLen << " bytes): " << preview;
+                        if (plainBytes.size() > previewLen) {
+                            std::cout << "...";
+                        }
+                        std::cout << std::endl;
+                    }
+                }
             } catch (const std::exception& e) {
                 std::cout << "Decryption failed: " << e.what() << std::endl;
             }
             break;
         }
-        case 6: {
-            std::cout << "Enter string to save (leave empty to use the last encryption result): ";
-            std::string dataToSave;
-            std::getline(std::cin, dataToSave);
-
-            if (dataToSave.empty()) {
-                if (result.empty()) {
-                    std::cout << "No previous encryption result available. Please enter a string." << std::endl;
-                    break;
-                }
-                dataToSave = result;
-                std::cout << "Using last encryption result." << std::endl;
-            }
-
-            std::cout << "Enter target file path: ";
-            std::string targetPath;
-            std::getline(std::cin, targetPath);
-
-            try {
-                WriteStringToBinaryFile(targetPath, dataToSave);
-                std::cout << "String saved to file: \"" << targetPath << "\"" << std::endl;
-            } catch (const std::exception& e) {
-                std::cout << "Failed to save string: " << e.what() << std::endl;
-            }
-            break;
-        }
-        case 7: {
-            if (!hasKeyPair) {
-                std::cout << "Please generate or input a key pair first." << std::endl;
-                break;
-            }
-
-            std::cout << "Enter source binary file path: ";
-            std::string sourcePath;
-            std::getline(std::cin, sourcePath);
-
-            try {
-                std::string binaryData = ReadBinaryFileToString(sourcePath);
-                std::vector<long long> encrypted = RSA::encryptText(binaryData, keyPair);
-                result = encodeCiphertextBase64(encrypted);
-                std::cout << "Encrypted Base64 (use option 6 to save if needed):" << std::endl;
-                std::cout << result << std::endl;
-            } catch (const std::exception& e) {
-                std::cout << "Binary encryption failed: " << e.what() << std::endl;
-            }
-            break;
-        }
-        case 8: {
-            if (!hasKeyPair) {
-                std::cout << "Please generate or input a key pair first." << std::endl;
-                break;
-            }
-
-            std::cout << "Enter Base64 ciphertext (or comma-separated numbers): ";
-            std::string ciphertextInput;
-            std::getline(std::cin, ciphertextInput);
-
-            try {
-                std::vector<long long> encrypted = parseCiphertext(ciphertextInput);
-                std::string decrypted = RSA::decryptText(encrypted, keyPair);
-                result = decrypted;
-                const std::string base64Preview = cppcodec::base64_rfc4648::encode(
-                    reinterpret_cast<const uint8_t*>(decrypted.data()),
-                    decrypted.size()
-                );
-                std::cout << "Decrypted binary data stored in memory (use option 6 to save)." << std::endl;
-                if (!base64Preview.empty()) {
-                    std::cout << "Base64 preview: " << base64Preview << std::endl;
-                } else {
-                    std::cout << "Decrypted data is empty." << std::endl;
-                }
-            } catch (const std::exception& e) {
-                std::cout << "Binary decryption failed: " << e.what() << std::endl;
-            }
-            break;
-        }
-        case 9: {
-            std::cout << "Enter binary file path: ";
-            std::string sourcePath;
-            std::getline(std::cin, sourcePath);
-
-            try {
-                std::string binaryData = ReadBinaryFileToString(sourcePath);
-                result = binaryData;
-                const std::string base64Preview = cppcodec::base64_rfc4648::encode(
-                    reinterpret_cast<const uint8_t*>(binaryData.data()),
-                    binaryData.size()
-                );
-                std::cout << "Binary file loaded into memory (use option 6 to save elsewhere)." << std::endl;
-                if (!base64Preview.empty()) {
-                    std::cout << "Base64 preview: " << base64Preview << std::endl;
-                } else {
-                    std::cout << "Loaded data is empty." << std::endl;
-                }
-            } catch (const std::exception& e) {
-                std::cout << "Failed to load binary file: " << e.what() << std::endl;
-            }
-            break;
-        }
         case 10: {
-            std::cout << "Exiting program. Goodbye!" << std::endl;
+            const std::string sourcePath = trim(readLine("Binary file path: "));
+            try {
+                result = ReadBinaryFileToString(sourcePath);
+                const size_t previewLen = std::min<size_t>(result.size(), 32);
+                const std::string preview = cppcodec::base64_rfc4648::encode(
+                    reinterpret_cast<const uint8_t*>(result.data()),
+                    previewLen);
+                std::cout << "Loaded file, " << result.size() << " bytes." << std::endl;
+                if (!result.empty()) {
+                    std::cout << "Base64 preview (first " << previewLen << " bytes): " << preview;
+                    if (result.size() > previewLen) {
+                        std::cout << "...";
+                    }
+                    std::cout << std::endl;
+                }
+            } catch (const std::exception& e) {
+                std::cout << "Failed to read file: " << e.what() << std::endl;
+            }
+            break;
+        }
+        case 11: {
+            std::cout << "Goodbye!" << std::endl;
             return 0;
         }
-        default: {
-            std::cout << "Invalid option. Please choose a number between 1 and 10." << std::endl;
+        default:
             break;
-        }
         }
     }
 

@@ -1,208 +1,498 @@
 #pragma once
+
 #include <string>
 #include <vector>
-#include <random>
-#include <cmath>
-#include <algorithm>
+#include <memory>
+#include <stdexcept>
 #include <iostream>
+#include <cstdint>
+#include <algorithm>
+#include <limits>
 
-namespace RSA {
+#include <openssl/rsa.h>
+#include <openssl/pem.h>
+#include <openssl/bn.h>
+#include <openssl/err.h>
+#include <openssl/bio.h>
+#include <openssl/buffer.h>
+
+// RSA helpers implemented on top of OpenSSL while keeping the original interfaces.
+namespace RSAUtil {
     
-    // RSA Key Pair structure using strings for keys
     struct KeyPair {
-        std::string publicKey;    // Public key e as string
-        std::string privateKey;   // Private key d as string
-        std::string modulus;      // Modulus n as string
+        std::string publicKey;    // Public exponent e
+        std::string privateKey;   // Private exponent d
+        std::string modulus;      // Modulus n
+    };
+
+    struct PemKeyPair {
+        std::string publicKeyPem;   // PEM encoded public key
+        std::string privateKeyPem;  // PEM encoded private key
+        int keyBits;                // Key size
     };
     
-    // Calculate Greatest Common Divisor
-    long long gcd(long long a, long long b) {
-        while (b != 0) {
-            long long temp = b;
-            b = a % b;
-            a = temp;
-        }
-        return a;
-    }
-    
-    // Extended Euclidean Algorithm to calculate modular inverse
-    long long extendedGcd(long long a, long long b, long long& x, long long& y) {
-        if (a == 0) {
-            x = 0;
-            y = 1;
-            return b;
-        }
-        long long x1, y1;
-        long long gcd = extendedGcd(b % a, a, x1, y1);
-        x = y1 - (b / a) * x1;
-        y = x1;
-        return gcd;
-    }
-    
-    // Calculate modular inverse
-    long long modInverse(long long a, long long m) {
-        long long x, y;
-        long long g = extendedGcd(a, m, x, y);
-        if (g != 1) return -1; // Modular inverse does not exist
-        return (x % m + m) % m;
-    }
-    
-    // Safe modular multiplication to prevent overflow
-    long long modMul(long long a, long long b, long long mod) {
-        // Handle negative numbers
-        a = (a % mod + mod) % mod;
-        b = (b % mod + mod) % mod;
-        
-        long long result = 0;
-        while (b > 0) {
-            if (b & 1) {
-                result = (result + a) % mod;
+    namespace detail {
+        struct BNDeleter {
+            void operator()(BIGNUM* bn) const noexcept {
+                BN_free(bn);
             }
-            a = (a << 1) % mod;  // a = (a * 2) % mod
-            b >>= 1;
-        }
-        return result;
-    }
-    
-    // Fast modular exponentiation with overflow protection
-    long long modPow(long long base, long long exp, long long mod) {
-        if (mod == 1) return 0;
+        };
         
-        long long result = 1;
-        base = (base % mod + mod) % mod;  // Ensure base is positive
-        
-        while (exp > 0) {
-            if (exp & 1) {
-                result = modMul(result, base, mod);
+        struct BNCTXDeleter {
+            void operator()(BN_CTX* ctx) const noexcept {
+                BN_CTX_free(ctx);
             }
-            exp >>= 1;
-            base = modMul(base, base, mod);
-        }
-        return result;
-    }
-    
-    // Simple primality test
-    bool isPrime(long long n) {
-        if (n <= 1) return false;
-        if (n <= 3) return true;
-        if (n % 2 == 0 || n % 3 == 0) return false;
+        };
         
-        for (long long i = 5; i * i <= n; i += 6) {
-            if (n % i == 0 || n % (i + 2) == 0) {
-                return false;
+        struct RSADeleter {
+            void operator()(::RSA* rsa) const noexcept {
+                RSA_free(rsa);
+            }
+        };
+        
+        struct OpenSSLStringDeleter {
+            void operator()(char* ptr) const noexcept {
+                OPENSSL_free(ptr);
+            }
+        };
+        
+        struct BIODeleter {
+            void operator()(BIO* bio) const noexcept {
+                BIO_free(bio);
+            }
+        };
+        
+        using UniqueBN = std::unique_ptr<BIGNUM, BNDeleter>;
+        using UniqueBNCTX = std::unique_ptr<BN_CTX, BNCTXDeleter>;
+        using UniqueRSA = std::unique_ptr<::RSA, RSADeleter>;
+        using UniqueOSSString = std::unique_ptr<char, OpenSSLStringDeleter>;
+        using UniqueBIO = std::unique_ptr<BIO, BIODeleter>;
+        
+        [[noreturn]] void throwOpenSSLError(const std::string& message) {
+            unsigned long errCode = ERR_get_error();
+            char buf[256] = {};
+            if (errCode != 0) {
+                ERR_error_string_n(errCode, buf, sizeof(buf));
+            }
+            throw std::runtime_error(message + (errCode != 0 ? (": " + std::string(buf)) : ""));
+        }
+        
+        UniqueBN makeBNFromDec(const std::string& decimal) {
+            BIGNUM* raw = nullptr;
+            if (BN_dec2bn(&raw, decimal.c_str()) == 0 || raw == nullptr) {
+                throw std::runtime_error("failed to convert decimal string to BIGNUM");
+            }
+            return UniqueBN(raw);
+        }
+        
+        UniqueBN makeBNFromWord(unsigned long value) {
+            UniqueBN bn(BN_new());
+            if (!bn || BN_set_word(bn.get(), value) != 1) {
+                throwOpenSSLError("failed to create BIGNUM");
+            }
+            return bn;
+        }
+        
+        long long bnToLongLong(const BIGNUM* bn) {
+            if (!bn) {
+                throw std::runtime_error("BIGNUM is null");
+            }
+            if (BN_num_bits(bn) > 63) {
+                throw std::runtime_error("value exceeds long long range");
+            }
+#if defined(_MSC_VER) && (_MSC_VER < 1900)
+            // BN_get_word returns unsigned long on older MSVC versions
+            return static_cast<long long>(BN_get_word(const_cast<BIGNUM*>(bn)));
+#else
+            return static_cast<long long>(BN_get_word(bn));
+#endif
+        }
+        
+        std::string bioToString(BIO* bio) {
+            BUF_MEM* mem = nullptr;
+            BIO_get_mem_ptr(bio, &mem);
+            if (!mem || !mem->data || mem->length <= 0) {
+                throw std::runtime_error("failed to extract data from BIO");
+            }
+            return std::string(mem->data, static_cast<size_t>(mem->length));
+        }
+        
+        UniqueBIO makeBioFromString(const std::string& data) {
+            BIO* bio = BIO_new_mem_buf(data.data(), static_cast<int>(data.size()));
+            if (!bio) {
+                throwOpenSSLError("failed to create memory BIO");
+            }
+            return UniqueBIO(bio);
+        }
+        
+        UniqueRSA loadPublicKey(const std::string& publicKeyPem) {
+            UniqueBIO bio(makeBioFromString(publicKeyPem));
+            RSA* rsa = PEM_read_bio_RSA_PUBKEY(bio.get(), nullptr, nullptr, nullptr);
+            if (!rsa) {
+                throwOpenSSLError("failed to load public key");
+            }
+            return UniqueRSA(rsa);
+        }
+        
+        UniqueRSA loadPrivateKey(const std::string& privateKeyPem) {
+            UniqueBIO bio(makeBioFromString(privateKeyPem));
+            RSA* rsa = PEM_read_bio_RSAPrivateKey(bio.get(), nullptr, nullptr, nullptr);
+            if (!rsa) {
+                throwOpenSSLError("failed to load private key");
+            }
+            return UniqueRSA(rsa);
+        }
+        
+        int maxChunkSizeForPadding(int rsaSize, int padding) {
+            switch (padding) {
+                case RSA_PKCS1_PADDING:
+                    return rsaSize - 11;
+                case RSA_PKCS1_OAEP_PADDING:
+                    return rsaSize - 42; // default SHA-1 OAEP
+                case RSA_PKCS1_PSS_PADDING:
+                    throw std::invalid_argument("PSS padding is not supported with RSA_public_encrypt");
+                case RSA_NO_PADDING:
+                    return rsaSize;
+                default:
+                    throw std::invalid_argument("unsupported RSA padding mode");
             }
         }
-        return true;
+    } // namespace detail
+    
+    inline void ensureOpenSSLInit() {
+#if OPENSSL_VERSION_NUMBER < 0x30000000L
+        static bool initialized = [] {
+            ERR_load_crypto_strings();
+            return true;
+        }();
+        (void)initialized;
+#endif
     }
     
-    // Generate random prime in safe range (1e5 to 1e6-1) to avoid overflow
-    long long generatePrime() {
-        std::random_device rd;
-        std::mt19937 gen(rd());
-        // Generate primes in range 100000 to 999999 (6 digits)
-        // This ensures p * q < 1e12, well within long long range (9e18)
-        std::uniform_int_distribution<long long> dis(100000LL, 999999LL);
+    inline KeyPair generateKeyPair() {
+        ensureOpenSSLInit();
         
-        long long candidate;
-        do {
-            candidate = dis(gen);
-            if (candidate % 2 == 0) candidate++; // Ensure it's odd
-        } while (!isPrime(candidate));
+        constexpr int kMaxAttempts = 32;
+        constexpr int kPrimeBits = 30; // ensures modulus fits into signed 64-bit range
         
-        return candidate;
-    }
-    
-    // Generate RSA key pair
-    KeyPair generateKeyPair() {
-        // Generate two distinct primes with larger range
-        long long p = generatePrime();
-        long long q;
-        do {
-            q = generatePrime();
-        } while (q == p);
+        detail::UniqueBNCTX ctx(BN_CTX_new());
+        if (!ctx) {
+            detail::throwOpenSSLError("failed to create BN_CTX");
+        }
         
-        // Calculate n = p * q
-        long long n = p * q;
-        
-        // Calculate Euler's totient function φ(n) = (p-1)(q-1)
-        long long phi = (p - 1) * (q - 1);
-        
-        // Choose public exponent e, typically 65537
-        long long e = 65537;
-        if (e >= phi || gcd(e, phi) != 1) {
-            // If 65537 is not suitable, choose a smaller value
-            e = 3;
-            while (gcd(e, phi) != 1) {
-                e += 2;
+        for (int attempt = 0; attempt < kMaxAttempts; ++attempt) {
+            detail::UniqueBN p(BN_new());
+            detail::UniqueBN q(BN_new());
+            detail::UniqueBN n(BN_new());
+            detail::UniqueBN phi(BN_new());
+            detail::UniqueBN pMinus(BN_new());
+            detail::UniqueBN qMinus(BN_new());
+            detail::UniqueBN gcd(BN_new());
+            
+            if (!p || !q || !n || !phi || !pMinus || !qMinus || !gcd) {
+                detail::throwOpenSSLError("failed to allocate BIGNUM");
             }
+            
+            if (BN_generate_prime_ex(p.get(), kPrimeBits, 0, nullptr, nullptr, nullptr) != 1) {
+                detail::throwOpenSSLError("failed to generate prime p");
+            }
+            if (BN_generate_prime_ex(q.get(), kPrimeBits, 0, nullptr, nullptr, nullptr) != 1) {
+                detail::throwOpenSSLError("failed to generate prime q");
+            }
+            if (BN_cmp(p.get(), q.get()) == 0) {
+                continue;
+            }
+            
+            if (BN_mul(n.get(), p.get(), q.get(), ctx.get()) != 1) {
+                detail::throwOpenSSLError("failed to compute modulus");
+            }
+            if (BN_num_bits(n.get()) > 63) {
+                continue;
+            }
+            
+            if (!BN_copy(pMinus.get(), p.get()) || BN_sub_word(pMinus.get(), 1) != 1) {
+                detail::throwOpenSSLError("failed to compute p-1");
+            }
+            if (!BN_copy(qMinus.get(), q.get()) || BN_sub_word(qMinus.get(), 1) != 1) {
+                detail::throwOpenSSLError("failed to compute q-1");
+            }
+            if (BN_mul(phi.get(), pMinus.get(), qMinus.get(), ctx.get()) != 1) {
+                detail::throwOpenSSLError("failed to compute phi");
+            }
+            
+            detail::UniqueBN e(detail::makeBNFromWord(65537));
+            if (BN_gcd(gcd.get(), e.get(), phi.get(), ctx.get()) != 1) {
+                detail::throwOpenSSLError("failed to compute gcd for exponent");
+            }
+            if (!BN_is_one(gcd.get())) {
+                static const unsigned long kFallbackExponents[] = {3UL, 5UL, 17UL, 257UL};
+                bool found = false;
+                for (unsigned long cand : kFallbackExponents) {
+                    if (BN_set_word(e.get(), cand) != 1) {
+                        detail::throwOpenSSLError("failed to set fallback exponent");
+                    }
+                    if (BN_gcd(gcd.get(), e.get(), phi.get(), ctx.get()) != 1) {
+                        detail::throwOpenSSLError("failed to compute gcd for fallback exponent");
+                    }
+                    if (BN_is_one(gcd.get())) {
+                        found = true;
+                        break;
+                    }
+                }
+                if (!found) {
+                    continue;
+                }
+            }
+            
+            BIGNUM* rawD = BN_mod_inverse(nullptr, e.get(), phi.get(), ctx.get());
+            if (!rawD) {
+                detail::throwOpenSSLError("failed to compute private exponent");
+            }
+            detail::UniqueBN d(rawD);
+            
+            if (BN_num_bits(d.get()) > 63 || BN_num_bits(e.get()) > 32) {
+                continue;
+            }
+            
+            detail::UniqueOSSString nStr(BN_bn2dec(n.get()));
+            detail::UniqueOSSString dStr(BN_bn2dec(d.get()));
+            detail::UniqueOSSString eStr(BN_bn2dec(e.get()));
+            
+            if (!nStr || !dStr || !eStr) {
+                detail::throwOpenSSLError("failed to convert BIGNUM to string");
+            }
+            
+            return {std::string(eStr.get()), std::string(dStr.get()), std::string(nStr.get())};
         }
         
-        // Calculate private exponent d
-        long long d = modInverse(e, phi);
+        throw std::runtime_error("unable to generate legacy-compatible RSA key pair");
+    }
+    
+    inline PemKeyPair generatePemKeyPair(int keyBits = 2048) {
+        ensureOpenSSLInit();
         
-        // Convert to strings
-        return {std::to_string(e), std::to_string(d), std::to_string(n)};
-    }
-    
-    // RSA encrypt single number
-    long long encryptNumber(long long message, const std::string& publicKey, const std::string& modulus) {
-        long long e = std::stoll(publicKey);
-        long long n = std::stoll(modulus);
-        return modPow(message, e, n);
-    }
-    
-    // RSA decrypt single number
-    long long decryptNumber(long long ciphertext, const std::string& privateKey, const std::string& modulus) {
-        long long d = std::stoll(privateKey);
-        long long n = std::stoll(modulus);
-        long long result = modPow(ciphertext, d, n);
-        // Handle negative results
-        if (result < 0) {
-            result += n;
+        if (keyBits < 512) {
+            throw std::invalid_argument("RSA key size must be at least 512 bits");
         }
-        return result;
+        
+        detail::UniqueBN exponent(detail::makeBNFromWord(RSA_F4));
+        detail::UniqueRSA rsa(RSA_new());
+        if (!rsa) {
+            detail::throwOpenSSLError("failed to allocate RSA structure");
+        }
+        
+        if (RSA_generate_key_ex(rsa.get(), keyBits, exponent.get(), nullptr) != 1) {
+            detail::throwOpenSSLError("RSA key generation failed");
+        }
+        
+        detail::UniqueBIO privateBio(BIO_new(BIO_s_mem()));
+        detail::UniqueBIO publicBio(BIO_new(BIO_s_mem()));
+        if (!privateBio || !publicBio) {
+            detail::throwOpenSSLError("failed to allocate BIO");
+        }
+        
+        if (PEM_write_bio_RSAPrivateKey(privateBio.get(), rsa.get(), nullptr, nullptr, 0, nullptr, nullptr) != 1) {
+            detail::throwOpenSSLError("failed to write private key PEM");
+        }
+        
+        if (PEM_write_bio_RSA_PUBKEY(publicBio.get(), rsa.get()) != 1) {
+            detail::throwOpenSSLError("failed to write public key PEM");
+        }
+        
+        return {detail::bioToString(publicBio.get()), detail::bioToString(privateBio.get()), keyBits};
     }
     
-    // Encrypt text
-    std::vector<long long> encryptText(const std::string& plaintext, const KeyPair& keyPair) {
+    inline int getKeyBitsFromPublicKey(const std::string& publicKeyPem) {
+        detail::UniqueRSA rsa(detail::loadPublicKey(publicKeyPem));
+        const int rsaSize = RSA_size(rsa.get());
+        if (rsaSize <= 0) {
+            throw std::runtime_error("invalid RSA key size");
+        }
+        return rsaSize * 8;
+    }
+    
+    inline long long encryptNumber(long long message, const std::string& publicKey, const std::string& modulus) {
+        ensureOpenSSLInit();
+        
+        if (message < 0) {
+            throw std::invalid_argument("message must be non-negative");
+        }
+        
+        detail::UniqueBN modulusBN(detail::makeBNFromDec(modulus));
+        detail::UniqueBN exponentBN(detail::makeBNFromDec(publicKey));
+        detail::UniqueBN messageBN(BN_new());
+        detail::UniqueBN resultBN(BN_new());
+        detail::UniqueBNCTX ctx(BN_CTX_new());
+        
+        if (!messageBN || !resultBN || !ctx) {
+            detail::throwOpenSSLError("failed to initialise BIGNUM objects");
+        }
+        
+        if (BN_set_word(messageBN.get(), static_cast<unsigned long>(message)) != 1) {
+            detail::throwOpenSSLError("failed to set message BIGNUM");
+        }
+        
+        if (BN_cmp(messageBN.get(), modulusBN.get()) >= 0) {
+            throw std::runtime_error("message must be smaller than modulus");
+        }
+        
+        if (BN_mod_exp(resultBN.get(), messageBN.get(), exponentBN.get(), modulusBN.get(), ctx.get()) != 1) {
+            detail::throwOpenSSLError("RSA encryption failed");
+        }
+        
+        return detail::bnToLongLong(resultBN.get());
+    }
+    
+    inline long long decryptNumber(long long ciphertext, const std::string& privateKey, const std::string& modulus) {
+        ensureOpenSSLInit();
+        
+        if (ciphertext < 0) {
+            throw std::invalid_argument("ciphertext must be non-negative");
+        }
+        
+        detail::UniqueBN modulusBN(detail::makeBNFromDec(modulus));
+        detail::UniqueBN exponentBN(detail::makeBNFromDec(privateKey));
+        detail::UniqueBN cipherBN(BN_new());
+        detail::UniqueBN resultBN(BN_new());
+        detail::UniqueBNCTX ctx(BN_CTX_new());
+        
+        if (!cipherBN || !resultBN || !ctx) {
+            detail::throwOpenSSLError("failed to initialise BIGNUM objects");
+        }
+        
+        if (BN_set_word(cipherBN.get(), static_cast<unsigned long>(ciphertext)) != 1) {
+            detail::throwOpenSSLError("failed to set ciphertext BIGNUM");
+        }
+        
+        if (BN_cmp(cipherBN.get(), modulusBN.get()) >= 0) {
+            throw std::runtime_error("ciphertext must be smaller than modulus");
+        }
+        
+        if (BN_mod_exp(resultBN.get(), cipherBN.get(), exponentBN.get(), modulusBN.get(), ctx.get()) != 1) {
+            detail::throwOpenSSLError("RSA decryption failed");
+        }
+        
+        return detail::bnToLongLong(resultBN.get());
+    }
+    
+    inline std::vector<uint8_t> encryptBytes(const std::vector<uint8_t>& plaintext,
+                                            const PemKeyPair& keyPair,
+                                            int padding = RSA_PKCS1_OAEP_PADDING) {
+        ensureOpenSSLInit();
+        
+        detail::UniqueRSA rsa(detail::loadPublicKey(keyPair.publicKeyPem));
+        const int rsaSize = RSA_size(rsa.get());
+        if (rsaSize <= 0) {
+            throw std::runtime_error("invalid RSA key size");
+        }
+        
+        const int maxChunk = detail::maxChunkSizeForPadding(rsaSize, padding);
+        if (maxChunk <= 0) {
+            throw std::invalid_argument("padding configuration results in non-positive chunk size");
+        }
+        
+        std::vector<uint8_t> encrypted;
+        if (!plaintext.empty()) {
+            encrypted.reserve(((plaintext.size() + static_cast<size_t>(maxChunk) - 1) / static_cast<size_t>(maxChunk)) * static_cast<size_t>(rsaSize));
+        }
+        std::vector<uint8_t> buffer(static_cast<size_t>(rsaSize));
+        
+        for (size_t offset = 0; offset < plaintext.size(); offset += static_cast<size_t>(maxChunk)) {
+            const size_t chunkSize = std::min(static_cast<size_t>(maxChunk), plaintext.size() - offset);
+            const int written = RSA_public_encrypt(static_cast<int>(chunkSize),
+                                                   plaintext.data() + offset,
+                                                   buffer.data(),
+                                                   rsa.get(),
+                                                   padding);
+            if (written <= 0) {
+                detail::throwOpenSSLError("RSA public encrypt failed");
+            }
+            encrypted.insert(encrypted.end(), buffer.begin(), buffer.begin() + written);
+        }
+        
+        return encrypted;
+    }
+    
+    inline std::vector<uint8_t> decryptBytes(const std::vector<uint8_t>& ciphertext,
+                                            const PemKeyPair& keyPair,
+                                            int padding = RSA_PKCS1_OAEP_PADDING) {
+        ensureOpenSSLInit();
+        
+        detail::UniqueRSA rsa(detail::loadPrivateKey(keyPair.privateKeyPem));
+        const int rsaSize = RSA_size(rsa.get());
+        if (rsaSize <= 0) {
+            throw std::runtime_error("invalid RSA key size");
+        }
+        
+        if (ciphertext.empty()) {
+            return {};
+        }
+        
+        if (ciphertext.size() % static_cast<size_t>(rsaSize) != 0) {
+            throw std::invalid_argument("ciphertext length is not aligned with RSA block size");
+        }
+        
+        std::vector<uint8_t> decrypted;
+        decrypted.reserve(ciphertext.size());
+        std::vector<uint8_t> buffer(static_cast<size_t>(rsaSize));
+        
+        for (size_t offset = 0; offset < ciphertext.size(); offset += static_cast<size_t>(rsaSize)) {
+            const int written = RSA_private_decrypt(rsaSize,
+                                                    ciphertext.data() + offset,
+                                                    buffer.data(),
+                                                    rsa.get(),
+                                                    padding);
+            if (written < 0) {
+                detail::throwOpenSSLError("RSA private decrypt failed");
+            }
+            decrypted.insert(decrypted.end(), buffer.begin(), buffer.begin() + written);
+        }
+        
+        return decrypted;
+    }
+    
+    inline std::vector<uint8_t> encryptTextToBytes(const std::string& plaintext,
+                                                   const PemKeyPair& keyPair,
+                                                   int padding = RSA_PKCS1_OAEP_PADDING) {
+        const std::vector<uint8_t> bytes(plaintext.begin(), plaintext.end());
+        return encryptBytes(bytes, keyPair, padding);
+    }
+    
+    inline std::string decryptTextFromBytes(const std::vector<uint8_t>& ciphertext,
+                                            const PemKeyPair& keyPair,
+                                            int padding = RSA_PKCS1_OAEP_PADDING) {
+        const std::vector<uint8_t> bytes = decryptBytes(ciphertext, keyPair, padding);
+        return std::string(bytes.begin(), bytes.end());
+    }
+    
+    inline std::vector<long long> encryptText(const std::string& plaintext, const KeyPair& keyPair) {
         std::vector<long long> ciphertext;
+        ciphertext.reserve(plaintext.size());
         
-        for (char c : plaintext) {
-            // Convert character to number (ASCII value)
-            long long charValue = static_cast<long long>(static_cast<unsigned char>(c));
-            
-            // Ensure character value is less than modulus
-            long long n = std::stoll(keyPair.modulus);
-            if (charValue >= n) {
-                throw std::runtime_error("Character value too large for modulus");
-            }
-            
-            // Encrypt character
-            long long encrypted = encryptNumber(charValue, keyPair.publicKey, keyPair.modulus);
+        for (unsigned char c : plaintext) {
+            long long encrypted = encryptNumber(static_cast<long long>(c), keyPair.publicKey, keyPair.modulus);
             ciphertext.push_back(encrypted);
         }
         
         return ciphertext;
     }
     
-    // Decrypt text
-    std::string decryptText(const std::vector<long long>& ciphertext, const KeyPair& keyPair) {
+    inline std::string decryptText(const std::vector<long long>& ciphertext, const KeyPair& keyPair) {
         std::string plaintext;
+        plaintext.reserve(ciphertext.size());
         
-        for (long long encrypted : ciphertext) {
-            // Decrypt number
-            long long decrypted = decryptNumber(encrypted, keyPair.privateKey, keyPair.modulus);
-            
-            // Convert number back to character
-            char c = static_cast<char>(decrypted);  // No mask needed anymore
-            plaintext += c;
+        for (long long value : ciphertext) {
+            long long decrypted = decryptNumber(value, keyPair.privateKey, keyPair.modulus);
+            if (decrypted < 0 || decrypted > 255) {
+                throw std::runtime_error("decrypted value is outside byte range");
+            }
+            plaintext += static_cast<char>(decrypted);
         }
         
         return plaintext;
     }
     
-    // Convert ciphertext vector to string (for storage or transmission)
-    std::string ciphertextToString(const std::vector<long long>& ciphertext) {
+    inline std::string ciphertextToString(const std::vector<long long>& ciphertext) {
         std::string result;
         for (size_t i = 0; i < ciphertext.size(); ++i) {
             if (i > 0) result += ",";
@@ -211,8 +501,7 @@ namespace RSA {
         return result;
     }
     
-    // Convert string to ciphertext vector
-    std::vector<long long> stringToCiphertext(const std::string& str) {
+    inline std::vector<long long> stringToCiphertext(const std::string& str) {
         std::vector<long long> result;
         std::string current;
         
@@ -234,8 +523,7 @@ namespace RSA {
         return result;
     }
     
-    // Print key information
-    void printKeyInfo(const KeyPair& keyPair) {
+    inline void printKeyInfo(const KeyPair& keyPair) {
         std::cout << "RSA Key Information:" << std::endl;
         std::cout << "Public Key (e): " << keyPair.publicKey << std::endl;
         std::cout << "Private Key (d): " << keyPair.privateKey << std::endl;
