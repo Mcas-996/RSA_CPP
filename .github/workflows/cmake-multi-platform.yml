@@ -46,8 +46,15 @@ jobs:
 
     steps:
     - uses: actions/checkout@v4
-      with:
-        submodules: recursive
+
+    - name: Ensure cppcodec present
+      shell: bash
+      run: |
+        if [ ! -f third_party/cppcodec/cppcodec/base64_rfc4648.hpp ]; then
+          echo "cppcodec missing; cloning..."
+          rm -rf third_party/cppcodec
+          git clone --depth 1 https://github.com/tplgy/cppcodec.git third_party/cppcodec
+        fi
 
     - name: Install dependencies (Linux)
       if: matrix.os == 'ubuntu-latest'
