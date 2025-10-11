@@ -77,6 +77,17 @@ std::string trim(const std::string& input) {
     return std::string(begin, end);
 }
 
+std::string stripSurroundingQuotes(const std::string& input) {
+    if (input.size() >= 2) {
+        const char first = input.front();
+        const char last = input.back();
+        if ((first == '"' && last == '"') || (first == '\'' && last == '\'')) {
+            return input.substr(1, input.size() - 2);
+        }
+    }
+    return input;
+}
+
 std::vector<long long> parseCiphertext(const std::string& input) {
     const std::string cleaned = stripWhitespace(input);
     if (cleaned.empty()) {
@@ -366,7 +377,7 @@ int main() {
                 dataToSave = result;
                 std::cout << "Using last result." << std::endl;
             }
-            const std::string targetPath = trim(readLine("Target file path: "));
+            const std::string targetPath = stripSurroundingQuotes(trim(readLine("Target file path: ")));
             try {
                 WriteStringToBinaryFile(targetPath, dataToSave);
                 std::cout << "Saved to: " << targetPath << std::endl;
@@ -376,7 +387,7 @@ int main() {
             break;
         }
         case 8: {
-            const std::string sourcePath = trim(readLine("Source binary file path: "));
+            const std::string sourcePath = stripSurroundingQuotes(trim(readLine("Source binary file path: ")));
             try {
                 const std::string binaryData = ReadBinaryFileToString(sourcePath);
                 if (mode == Mode::Legacy) {
@@ -438,7 +449,7 @@ int main() {
             break;
         }
         case 10: {
-            const std::string sourcePath = trim(readLine("Binary file path: "));
+            const std::string sourcePath = stripSurroundingQuotes(trim(readLine("Binary file path: ")));
             try {
                 result = ReadBinaryFileToString(sourcePath);
                 const size_t previewLen = std::min<size_t>(result.size(), 32);
