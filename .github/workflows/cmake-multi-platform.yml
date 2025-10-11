@@ -149,3 +149,49 @@ jobs:
         workspace=$(cygpath -u "$GITHUB_WORKSPACE")
         cd "$workspace/build"
         ctest --build-config ${{ matrix.build_type }}
+
+    - name: Collect artifacts (Linux/macOS)
+      if: matrix.os != 'windows-latest'
+      run: |
+        build_dir="${{ steps.strings.outputs.build-output-dir }}"
+        artifact_dir="${build_dir}/artifacts"
+        mkdir -p "${artifact_dir}"
+        for target in RSA_CPP RSA_CLI; do
+          if [ -f "${build_dir}/${target}" ]; then
+            cp "${build_dir}/${target}" "${artifact_dir}/${target}_${{ runner.os }}"
+          elif [ -f "${build_dir}/Release/${target}" ]; then
+            cp "${build_dir}/Release/${target}" "${artifact_dir}/${target}_${{ runner.os }}"
+          elif [ -f "${build_dir}/${target}.app/Contents/MacOS/${target}" ]; then
+            cp "${build_dir}/${target}.app/Contents/MacOS/${target}" "${artifact_dir}/${target}_${{ runner.os }}"
+          fi
+        done
+        if [ -z "$(ls -A "${artifact_dir}")" ]; then
+          echo "No binaries found; creating placeholder to keep artifact step happy."
+          echo "Build produced no binaries to archive." > "${artifact_dir}/NO_ARTIFACTS.txt"
+        fi
+
+    - name: Collect artifacts (Windows)
+      if: matrix.os == 'windows-latest'
+      shell: msys2 {0}
+      run: |
+        workspace=$(cygpath -u "$GITHUB_WORKSPACE")
+        build_dir="$workspace/build"
+        artifact_dir="$build_dir/artifacts"
+        mkdir -p "$artifact_dir"
+        for target in RSA_CPP RSA_CLI; do
+          if [ -f "$build_dir/${target}.exe" ]; then
+            cp "$build_dir/${target}.exe" "$artifact_dir/${target}_Windows.exe"
+          elif [ -f "$build_dir/Release/${target}.exe" ]; then
+            cp "$build_dir/Release/${target}.exe" "$artifact_dir/${target}_Windows.exe"
+          fi
+        done
+        if [ -z "$(ls -A "$artifact_dir")" ]; then
+          echo "No binaries found; creating placeholder to keep artifact step happy." > "$artifact_dir/NO_ARTIFACTS.txt"
+        fi
+
+    - name: Upload artifacts
+      if: always()
+      uses: actions/upload-artifact@v4
+      with:
+        name: RSA_CPP-${{ matrix.os }}-${{ matrix.c_compiler }}
+        path: ${{ steps.strings.outputs.build-output-dir }}/artifacts
