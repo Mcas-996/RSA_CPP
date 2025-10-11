@@ -1,55 +1,91 @@
-# RSA_CPP（中文说明）
+# RSA_CPP 项目说明（中文）
 
-一个用 C++ 实现的 RSA 加解密示例项目，同时提供图形界面（GUI）与命令行（CLI）。
-
-本仓库适合学习与演示 RSA 基本流程，不建议直接用于生产环境安全需求。
+这是一个使用 C++ 编写的 RSA 加解密示例项目，同时提供图形界面 (GUI) 与命令行界面 (CLI)，适合学习、演示和验证 RSA 公钥体系的工作流程。
 
 ## 项目概述
 
-包含以下功能：
-- 随机生成 6 位素数并构造 RSA 密钥对（e、d、n）
-- 文本加解密（逐字符，适合 ASCII/UTF-8 场景）
-- 密文格式转换（逗号分隔数字、Base64）
-- 二进制文件加解密（通过字节串与 Base64 辅助）
+项目包含以下核心能力：
+- 生成示例 RSA 密钥对（演示版默认使用 6 位质数）
+- 文本加解密，支持 ASCII/UTF-8 字符
+- Base64 编码/解码与二进制数据处理
+- GUI 与 CLI 双形态应用，方便在桌面环境或脚本环境中使用
 
-提供两个入口：
-- GUI：基于 ImGui（Windows 使用 DirectX 11；Linux/macOS 使用 GLFW + OpenGL）
-- CLI：命令行工具，便于脚本化和快速验证
+## 功能亮点
 
-## 主要文件结构
+- 快速生成并展示示例级 RSA 密钥对
+- GUI 端提供一站式密钥管理、明文/密文切换与 Base64 预览
+- CLI 端支持批处理脚本、回归测试等自动化场景
+- 内置二进制文件与 Base64 的互转工具，简化文件加解密流程
+- 跨平台图形界面基于 ImGui：Windows 使用 DirectX 11，Linux/macOS 使用 GLFW + OpenGL
+- 使用 OpenSSL 进行大整数运算，结合快速模幂与扩展欧几里得算法
+
+## 目录结构
 
 ```
 RSA_CPP/
-  ├─ main.cpp          # GUI 入口
-  ├─ main_cli.cpp      # CLI 入口
-  ├─ RSA.hpp           # RSA 核心（教学版，long long）
-  ├─ bin.hpp           # 二进制文件 <-> std::string 工具
-  ├─ prepare.hpp/.cpp  # GUI 平台初始化与设备管理
-  ├─ Iwanna.hpp        # GUI 逻辑
-  ├─ ImGui/            # ImGui 源码
-  ├─ CMakeLists.txt    # 构建脚本
-  └─ build/            # 构建输出目录
+  CMakeLists.txt            # 顶层 CMake 构建脚本
+  main.cpp                  # GUI 程序入口 (ImGui)
+  main_cli.cpp              # CLI 程序入口
+  RSA.hpp                   # RSA 算法实现
+  bin.hpp                   # 二进制/Base64 工具函数
+  prepare.cpp/.hpp          # 平台初始化与图形上下文封装
+  Iwanna.hpp                # GUI 逻辑
+  ImGui/                    # ImGui 源码
+  third_party/cppcodec/     # Base64 编解码依赖（CI 中自动拉取）
+  build/                    # 本地构建输出目录（默认忽略）
 ```
 
 ## 构建与运行
 
-依赖：C++17 编译器、CMake >= 3.15；GUI 还需要（Win: DirectX 11 / Linux & macOS: OpenGL3 + GLFW3）。
+### 通用依赖
+- C++17 兼容编译器（GCC、Clang 或 MSYS2 MinGW GCC）
+- CMake 3.15 及以上版本
+- OpenSSL 开发头文件与库
+- OpenGL 3.0+ 与 GLFW 3（用于 GUI 版本）
+- Git：请使用 `git clone --recursive` 或执行 `git submodule update --init --recursive` 以确保本地存在 `third_party/cppcodec`
 
-通用构建步骤：
-```bash
-mkdir build
-cd build
-cmake ..
-cmake --build .
+### Windows（MSYS2 / MinGW）
+```
+# 在 MSYS2 MinGW 64-bit shell 中执行
+pacman -S --needed base-devel git mingw-w64-x86_64-gcc mingw-w64-x86_64-cmake \
+  mingw-w64-x86_64-ninja mingw-w64-x86_64-openssl mingw-w64-x86_64-glfw
+cmake -G Ninja -B build -S . -DCMAKE_BUILD_TYPE=Release
+cmake --build build
 ```
 
-可执行文件（默认在 build/ 下）：
-- GUI：`RSA_CPP`（Windows 为 `RSA_CPP.exe`）
-- CLI：`RSA_CLI`（Windows 为 `RSA_CLI.exe`）
+### Linux（以 Debian/Ubuntu 为例）
+```
+sudo apt update
+sudo apt install build-essential cmake ninja-build pkg-config libgl1-mesa-dev libglfw3-dev libssl-dev
+cmake -G Ninja -B build -S . -DCMAKE_BUILD_TYPE=Release
+cmake --build build
+```
+
+### macOS（Homebrew）
+```
+brew update
+brew install cmake ninja glfw openssl@3
+cmake -G Ninja -B build -S . -DCMAKE_BUILD_TYPE=Release -DOPENSSL_ROOT_DIR=$(brew --prefix openssl@3)
+cmake --build build
+```
+
+### 构建产物
+- `build/RSA_CPP`（Windows 下为 `RSA_CPP.exe`）：GUI 程序
+- `build/RSA_CLI`（Windows 下为 `RSA_CLI.exe`）：命令行工具
+- macOS 额外生成 `build/RSA_CPP.app`，可执行文件位于 `Contents/MacOS/`
+
+## 持续集成与构建产物
+
+仓库内的 `.github/workflows/cmake-multi-platform.yml` 工作流会在以下平台自动构建：
+- Ubuntu：GCC 与 Clang 两套工具链
+- macOS：Clang + Homebrew 依赖
+- Windows：MSYS2 MinGW 环境
+
+工作流会自动安装依赖、确保 `third_party/cppcodec` 可用、执行 CMake 配置/编译与 `ctest`，并将生成的可执行文件打包为 `RSA_CPP-<os>-<compiler>` 形式的构建产物。可在任意一次成功运行的 GitHub Actions 记录中，通过页面右上角的 **Artifacts** 面板下载对应平台的二进制文件。
 
 ## CLI 使用说明
 
-启动后将看到菜单：
+启动 CLI 后会看到如下菜单：
 ```
 Options:
 1. Generate new key pair
@@ -64,20 +100,17 @@ Options:
 10. Exit
 ```
 
-工作方式与要点：
-- 程序维护一个内存变量 `result`，用来暂存最近的“字符串结果”。
-  - 可能是：明文、Base64 密文、或“原始二进制字节组成的字符串”。
-- 第 6 项“保存字符串到二进制文件”是“原样写入”，不会自动做 Base64 解码。
-  - 若你的数据是 Base64 文本，直接用 6 会把“Base64 字符”写成文件，而不是还原的二进制。
-  - 还原场景：用 8 先解密 Base64 得到原始字节串 → 再用 6 写入文件。
-- 二进制相关快捷项：
-  - 7：读取二进制文件 → 加密 → 输出 Base64（存入 `result`）。
-  - 8：输入 Base64/数字密文 → 解密 → 得到原始二进制（存入 `result`），并打印 Base64 预览。
-  - 9：把任意二进制文件直接加载到 `result`（不加解密），也会给出 Base64 预览便于确认。
+使用要点：
+- 程序维护一个内存缓存 `result`，用于保存最近一次操作的字符串。它可能是明文、Base64 密文或原始二进制数据（以字节串形式保存）。
+- 选项 6 会直接将当前字符串按原样写入文件，并不会自动 Base64 解码；若要恢复二进制数据，请先使用选项 8。
+- 选项 7/8/9 可用于常见的文件工作流：
+  - 7：读取二进制文件、加密并输出 Base64，同时将结果写入缓存
+  - 8：输入 Base64（或逗号分隔的数字密文），解密得到原始字节并存入缓存，并提供 Base64 预览
+  - 9：直接将任意二进制文件载入缓存，便于后续保存或加密
 
 ### 操作示例
 
-1) 加密二进制文件并获得 Base64
+1) 加密任意二进制文件并得到 Base64
 ```
 Choose an option (1-10): 7
 Enter source binary file path: ./data/input.bin
@@ -85,7 +118,7 @@ Encrypted Base64 (use option 6 to save if needed):
 <Base64 ciphertext here>
 ```
 
-2) 将 Base64 密文解密为原始二进制并保存为文件
+2) 解密 Base64 密文并保存为文件
 ```
 Choose an option (1-10): 8
 Enter Base64 ciphertext (or comma-separated numbers): <paste here>
@@ -99,7 +132,7 @@ Enter target file path: ./data/output.bin
 String saved to file: "./data/output.bin"
 ```
 
-3) 读取一个二进制文件到内存并另存
+3) 读取二进制文件到内存并重新保存
 ```
 Choose an option (1-10): 9
 Enter binary file path: ./data/input.bin
@@ -113,20 +146,24 @@ Enter target file path: ./data/copy.bin
 String saved to file: "./data/copy.bin"
 ```
 
-## 技术与限制（教学版说明）
+## 开发与安全说明
 
-- 本实现使用 `long long`，素数范围为 6 位数量级，仅用于演示流程与原理。
-- 加解密为“逐字符”模式，字符值需要小于模数 `n`。
-- 如需生产可用的强安全性，请使用大整数库与 2048 位及以上密钥长度。
+- 演示实现使用 `long long` 存储大整数，密钥规模约为 6 位质数 * 6 位质数，适用于教学演示，不适合生产环境。
+- 加密文本的字符值需小于模数 `n`，请根据密钥规模控制输入。
+- 如需生产级安全性，请改用 2048 位及以上大整数库，并配合安全随机数生成器。
 
-## 许可与贡献
+## 许可证
 
-- 许可：MIT（详见 `LICENSE`）。
-- 欢迎通过 Issue 或 PR 贡献代码与建议。
+- 本项目采用 MIT 许可证，详情参见仓库中的 `LICENSE` 文件。
 
-## 作者与更新
+## 贡献
+
+欢迎通过 Issue 或 Pull Request 提交问题与改进建议。
+
+## 作者
 
 - 作者：Mcas-996
-- 更新日志：
-  - v0.0.1 初始版本，提供 GUI 与 CLI，支持文本与二进制辅助流程。
 
+## 更新日志
+
+- v0.0.1：初始版本，提供 GUI 与 CLI，覆盖完整的文本与文件加解密流程。

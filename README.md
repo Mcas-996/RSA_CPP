@@ -20,85 +20,71 @@ The project provides two interfaces:
 
 ## Features
 
-### Core Features
-- ✅ RSA key pair generation (with large primes)
-- ✅ Text encryption (supports ASCII characters)
-- ✅ Text decryption
-- ✅ Key import/export
-- ✅ Ciphertext format conversion
-
-### Technical Highlights
-- 🔐 Uses large primes (6-digit range) for security
-- ⚡ Fast modular exponentiation algorithm
-- 🎯 Extended Euclidean algorithm for modular inverse calculation
-- 📊 Comprehensive error handling and boundary checks
+- Generate RSA key pairs (demo uses 6-digit primes for clarity)
+- Encrypt and decrypt ASCII/UTF-8 text from either GUI or CLI workflows
+- Convert ciphertext to and from Base64, including binary file helpers
+- Cross-platform GUI powered by ImGui (DirectX 11 on Windows, GLFW/OpenGL on Linux & macOS)
+- CLI workflow designed for scripting, regression testing, and automation
+- OpenSSL-backed cryptographic helpers with fast modular exponentiation
 
 ## Project Structure
 
 ```
-RSA_CPP/RSA_CPP/
-├── main.cpp              # GUI main program
-├── main_cli.cpp          # CLI main program
-├── RSA.hpp               # Core RSA algorithm implementation
-├── prepare.hpp           # DirectX and ImGui initialization
-├── Iwanna.hpp            # GUI interface logic
-├── prepare.cpp           # DirectX device management
-├── CMakeLists.txt        # CMake build configuration
-├── ImGui/                # ImGui library files
-└── build/                # Build output directory
+RSA_CPP/
+  CMakeLists.txt            # Top-level CMake build script
+  main.cpp                  # GUI entry point (ImGui)
+  main_cli.cpp              # CLI entry point
+  RSA.hpp                   # Core RSA implementation
+  bin.hpp                   # Binary/Base64 utilities
+  prepare.cpp/.hpp          # Platform setup helpers
+  Iwanna.hpp                # GUI logic
+  ImGui/                    # ImGui source files
+  third_party/cppcodec/     # Base64 codec dependency (cloned automatically in CI)
+  build/                    # Generated build directory (ignored in VCS)
 ```
 
 ## Building and Running
 
-### Requirements
-- **Operating System**: Windows, Linux, or macOS
-- **Compiler**: C++17 compatible compiler (MSVC, GCC, Clang)
-- **Build Tool**: CMake 3.15 or higher
-- **GUI Dependencies**:
-  - Windows: DirectX 11 (included with Windows SDK)
-  - Linux/macOS: OpenGL 3.0+ and GLFW 3
+### Common Prerequisites
+- C++17 compatible compiler (GCC, Clang, or MSYS2 MinGW GCC)
+- CMake 3.15 or newer
+- OpenSSL development headers and libraries
+- OpenGL 3.0+ and GLFW 3 for GUI builds
+- Git (use `git clone --recursive` or run `git submodule update --init --recursive` to ensure `third_party/cppcodec` is present when building locally)
 
-For Linux/macOS you can install GLFW via your package manager:
-
-```bash
-# Debian/Ubuntu
-sudo apt install libglfw3-dev
-
-# macOS (Homebrew)
-brew install glfw
+### Windows (MSYS2 / MinGW)
+```
+# Run inside the MSYS2 MinGW 64-bit shell
+pacman -S --needed base-devel git mingw-w64-x86_64-gcc mingw-w64-x86_64-cmake \
+  mingw-w64-x86_64-ninja mingw-w64-x86_64-openssl mingw-w64-x86_64-glfw
+cmake -G Ninja -B build -S . -DCMAKE_BUILD_TYPE=Release
+cmake --build build
 ```
 
-### Build Steps
+### Linux (Debian/Ubuntu example)
+```
+sudo apt update
+sudo apt install build-essential cmake ninja-build pkg-config libgl1-mesa-dev libglfw3-dev libssl-dev
+cmake -G Ninja -B build -S . -DCMAKE_BUILD_TYPE=Release
+cmake --build build
+```
 
-1. **Create build directory**
-   ```bash
-   mkdir build
-   cd build
-   ```
+### macOS (Homebrew)
+```
+brew update
+brew install cmake ninja glfw openssl@3
+cmake -G Ninja -B build -S . -DCMAKE_BUILD_TYPE=Release -DOPENSSL_ROOT_DIR=$(brew --prefix openssl@3)
+cmake --build build
+```
 
-2. **Configure with CMake**
-   ```bash
-   cmake ..
-   ```
+### Build Outputs
+- `build/RSA_CPP` (`RSA_CPP.exe` on Windows) - GUI application
+- `build/RSA_CLI` (`RSA_CLI.exe` on Windows) - CLI utility
+- macOS builds also produce `build/RSA_CPP.app` (binary inside `Contents/MacOS/`)
 
-3. **Build the project**
-   ```bash
-   cmake --build .
-   ```
+## Continuous Integration & Artifacts
 
-### Running the Program
-
-After successful build, two executable files will be generated in the `build/` directory:
-
-- **GUI Version**: `RSA_CPP` (`RSA_CPP.exe` on Windows)
-  ```bash
-  ./build/RSA_CPP
-  ```
-
-- **CLI Version**: `RSA_CLI` (`RSA_CLI.exe` on Windows)
-  ```bash
-  ./build/RSA_CLI
-  ```
+GitHub Actions workflow `.github/workflows/cmake-multi-platform.yml` builds the project on Ubuntu (GCC & Clang), macOS (Clang), and Windows (MSYS2 MinGW). Each run installs the required dependencies, ensures `third_party/cppcodec` is present, configures CMake, compiles both targets, runs `ctest`, and uploads the resulting executables as artifacts named `RSA_CPP-<os>-<compiler>`. You can download these prebuilt binaries from the **Artifacts** panel of a successful workflow run.
 
 ## Usage Instructions
 
@@ -290,3 +276,9 @@ Mcas-996
    Enter target file path: ./data/copy.bin
    String saved to file: "./data/copy.bin"
    ```
+
+
+
+
+
+
