@@ -196,9 +196,11 @@ int main() {
         std::cout << "8. Encrypt binary file" << std::endl;
         std::cout << "9. Decrypt Base64 ciphertext to binary" << std::endl;
         std::cout << "10. Load binary file into memory" << std::endl;
-        std::cout << "11. Exit" << std::endl;
+        std::cout << "11. Encrypt file to file" << std::endl;
+        std::cout << "12. Decrypt file to file" << std::endl;
+        std::cout << "13. Exit" << std::endl;
 
-        const int choice = readInt("Choose an option (1-11): ", 1, 11);
+        const int choice = readInt("Choose an option (1-13): ", 1, 13);
 
         switch (choice) {
         case 1: {
@@ -470,6 +472,62 @@ int main() {
             break;
         }
         case 11: {
+            if (mode == Mode::Legacy && !legacy.hasKey) {
+                std::cout << "Generate or import legacy keys first." << std::endl;
+                break;
+            }
+            if (mode == Mode::Pem && !pem.hasPublic) {
+                std::cout << "Load or generate a PEM public key first." << std::endl;
+                break;
+            }
+            const std::string sourcePath = stripSurroundingQuotes(trim(readLine("Source file path (plaintext): ")));
+            const std::string targetPath = stripSurroundingQuotes(trim(readLine("Target file path (ciphertext output): ")));
+            try {
+                const std::string binaryData = ReadBinaryFileToString(sourcePath);
+                if (mode == Mode::Legacy) {
+                    const std::vector<long long> encrypted = RSAUtil::encryptText(binaryData, legacy.keyPair);
+                    result = encodeCiphertextBase64(encrypted);
+                } else {
+                    const std::vector<uint8_t> plainBytes(binaryData.begin(), binaryData.end());
+                    const std::vector<uint8_t> encrypted = RSAUtil::encryptBytes(plainBytes, pem.keyPair);
+                    result = encodeBase64(encrypted);
+                }
+                WriteStringToBinaryFile(targetPath, result);
+                std::cout << "Encryption complete. Wrote Base64 ciphertext to: " << targetPath << std::endl;
+            } catch (const std::exception& e) {
+                std::cout << "File encryption failed: " << e.what() << std::endl;
+            }
+            break;
+        }
+        case 12: {
+            if (mode == Mode::Legacy && !legacy.hasKey) {
+                std::cout << "Generate or import legacy keys first." << std::endl;
+                break;
+            }
+            if (mode == Mode::Pem && !pem.hasPrivate) {
+                std::cout << "Private key not loaded; cannot decrypt." << std::endl;
+                break;
+            }
+            const std::string cipherPath = stripSurroundingQuotes(trim(readLine("Ciphertext file path: ")));
+            const std::string targetPath = stripSurroundingQuotes(trim(readLine("Target file path (plaintext output): ")));
+            try {
+                const std::string cipherData = ReadBinaryFileToString(cipherPath);
+                if (mode == Mode::Legacy) {
+                    const std::vector<long long> encrypted = parseCiphertext(cipherData);
+                    result = RSAUtil::decryptText(encrypted, legacy.keyPair);
+                } else {
+                    const std::vector<uint8_t> cipherBytes = decodeBase64(cipherData);
+                    const std::vector<uint8_t> plainBytes = RSAUtil::decryptBytes(cipherBytes, pem.keyPair);
+                    result.assign(plainBytes.begin(), plainBytes.end());
+                }
+                WriteStringToBinaryFile(targetPath, result);
+                std::cout << "Decryption complete. Wrote plaintext to: " << targetPath << std::endl;
+            } catch (const std::exception& e) {
+                std::cout << "File decryption failed: " << e.what() << std::endl;
+            }
+            break;
+        }
+        case 13: {
             std::cout << "Goodbye!" << std::endl;
             return 0;
         }
