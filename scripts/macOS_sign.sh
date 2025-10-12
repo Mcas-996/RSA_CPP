@@ -9,7 +9,7 @@ echo "Target directory: $target_dir"
 
 if command -v xattr >/dev/null 2>&1; then
     echo "Clearing quarantine attributes (if any)..."
-    xattr -dr com.apple.quarantine "$target_dir" 2>/dev/null || true
+    sudo xattr -dr com.apple.quarantine "$target_dir" 2>/dev/null || true
 fi
 
 echo "Signing helper libraries and executables under $target_dir ..."
@@ -17,13 +17,13 @@ echo "Signing helper libraries and executables under $target_dir ..."
 find "$target_dir" -type f \( -name "*.dylib" -o -name "*.lib" -o -name "*.a" -o -perm -u+x -o -perm -g+x -o -perm -o+x \) -print0 |
 while IFS= read -r -d '' file; do
     echo "Signing $file"
-    codesign --force --sign - --timestamp=none "$file"
-    codesign --verify --verbose=2 "$file"
+    sudo codesign --force --sign - --timestamp=none "$file"
+    sudo codesign --verify --verbose=2 "$file"
     if command -v spctl >/dev/null 2>&1; then
         if sudo -n true 2>/dev/null; then
             sudo spctl --add --label "RSA_CPP_Local" "$file" || true
         else
-            spctl --add --label "RSA_CPP_Local" "$file" || true
+            sudo spctl --add --label "RSA_CPP_Local" "$file" || true
         fi
     fi
 done

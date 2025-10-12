@@ -62,14 +62,37 @@ jobs:
       if: matrix.os == 'ubuntu-latest'
       run: |
         sudo apt-get update
-        sudo apt-get install -y build-essential libgl1-mesa-dev libglfw3-dev libssl-dev pkg-config patchelf
+        sudo apt-get install -y build-essential libgl1-mesa-dev libx11-dev libxrandr-dev libxi-dev libxinerama-dev libxcursor-dev libglfw3-dev libssl-dev pkg-config
 
-    - name: Install dependencies (macOS)
+    - name: Prepare static deps (macOS)
       if: matrix.os == 'macos-latest'
+      shell: bash
       run: |
-        brew update
-        brew install glfw openssl@3
-        echo "OPENSSL_ROOT_DIR=$(brew --prefix openssl@3)" >> "$GITHUB_ENV"
+        set -euo pipefail
+        # Build static OpenSSL
+        workdir="${{ runner.temp }}/deps"
+        mkdir -p "$workdir" && cd "$workdir"
+        curl -L -o openssl.tar.gz https://www.openssl.org/source/openssl-3.3.1.tar.gz
+        tar -xf openssl.tar.gz
+        cd openssl-3.3.1
+        arch=$(uname -m)
+        if [[ "$arch" == "arm64" ]]; then target=darwin64-arm64-cc; else target=darwin64-x86_64-cc; fi
+        ./Configure "$target" no-shared no-tests --prefix="$workdir/openssl-static"
+        make -j$(sysctl -n hw.logicalcpu)
+        make install_sw
+        echo "OPENSSL_ROOT_DIR=$workdir/openssl-static" >> "$GITHUB_ENV"
+
+        # Build static GLFW
+        cd "$workdir"
+        git clone --depth 1 https://github.com/glfw/glfw.git
+        cmake -S glfw -B glfw/build \
+          -DCMAKE_BUILD_TYPE=Release \
+          -DBUILD_SHARED_LIBS=OFF \
+          -DGLFW_BUILD_DOCS=OFF -DGLFW_BUILD_TESTS=OFF -DGLFW_BUILD_EXAMPLES=OFF \
+          -DCMAKE_INSTALL_PREFIX="$workdir/glfw-static"
+        cmake --build glfw/build --config Release --target install -j
+        echo "PKG_CONFIG_PATH=$workdir/glfw-static/lib/pkgconfig" >> "$GITHUB_ENV"
+        echo "PKG_CONFIG_ALL_STATIC=1" >> "$GITHUB_ENV"
 
     - name: Setup MSYS2 environment (Windows)
       if: matrix.os == 'windows-latest'
@@ -104,8 +127,19 @@ jobs:
           -DCMAKE_C_COMPILER=${{ matrix.c_compiler }}
           -DCMAKE_BUILD_TYPE=${{ matrix.build_type }}
         )
+        cmake_args+=("-DOPENSSL_USE_STATIC_LIBS=TRUE")
+        cmake_args+=("-DCMAKE_DISABLE_FIND_PACKAGE_glfw3=TRUE")
         if [ -n "${OPENSSL_ROOT_DIR:-}" ]; then
           cmake_args+=("-DOPENSSL_ROOT_DIR=${OPENSSL_ROOT_DIR}")
+        fi
+        # Prefer static glfw via pkg-config on Linux/macOS
+        if [ -n "${PKG_CONFIG_PATH:-}" ]; then
+          export PKG_CONFIG_PATH
+        fi
+        export PKG_CONFIG_ALL_STATIC=${PKG_CONFIG_ALL_STATIC:-1}
+        # Slightly reduce runtime deps on Linux by static libstdc++/libgcc
+        if [[ "${{ runner.os }}" == "Linux" ]]; then
+          cmake_args+=("-DCMAKE_EXE_LINKER_FLAGS=-static-libstdc++ -static-libgcc")
         fi
         cmake_args+=(-S "${{ github.workspace }}")
         cmake "${cmake_args[@]}"
@@ -115,13 +149,17 @@ jobs:
       shell: msys2 {0}
       run: |
         workspace=$(cygpath -u "$GITHUB_WORKSPACE")
+        export PKG_CONFIG_ALL_STATIC=1
         cmake -G Ninja \
           -B "$workspace/build" \
           -S "$workspace" \
           -DCMAKE_BUILD_TYPE=${{ matrix.build_type }} \
           -DCMAKE_CXX_COMPILER=${{ matrix.cpp_compiler }} \
           -DCMAKE_C_COMPILER=${{ matrix.c_compiler }} \
-          -DOPENSSL_ROOT_DIR=/mingw64
+          -DOPENSSL_ROOT_DIR=/mingw64 \
+          -DOPENSSL_USE_STATIC_LIBS=TRUE \
+          -DCMAKE_DISABLE_FIND_PACKAGE_glfw3=TRUE \
+          -DCMAKE_EXE_LINKER_FLAGS="-static -static-libstdc++ -static-libgcc"
 
     - name: Build (Linux/macOS)
       if: matrix.os != 'windows-latest'
@@ -150,7 +188,7 @@ jobs:
         cd "$workspace/build"
         ctest --build-config ${{ matrix.build_type }}
 
-    - name: Bundle Linux artifacts
+    - name: Collect artifacts (Linux)
       if: matrix.os == 'ubuntu-latest'
       shell: bash
       run: |
@@ -159,42 +197,14 @@ jobs:
         artifact_dir="${build_dir}/artifacts"
         mkdir -p "${artifact_dir}"
 
-        resolve_binary() {
-          local name="$1"
-          local dir="$2"
-          if [[ -f "${dir}/${name}" ]]; then
-            echo "${dir}/${name}"
-            return 0
+        for name in RSA_CLI RSA_CPP; do
+          if [[ -f "${build_dir}/${name}" ]]; then
+            cp "${build_dir}/${name}" "${artifact_dir}/${name}_Linux"
+          elif [[ -f "${build_dir}/Release/${name}" ]]; then
+            cp "${build_dir}/Release/${name}" "${artifact_dir}/${name}_Linux"
           fi
-          if [[ -f "${dir}/Release/${name}" ]]; then
-            echo "${dir}/Release/${name}"
-            return 0
-          fi
-          return 1
-        }
-
-        cli_binary="$(resolve_binary RSA_CLI "${build_dir}")"
-        gui_binary="$(resolve_binary RSA_CPP "${build_dir}")"
-
-        if [[ -z "${cli_binary}" && -z "${gui_binary}" ]]; then
-          echo "No Linux binaries found to bundle."
-          exit 1
-        fi
-
-        if [[ -n "${cli_binary}" ]]; then
-          cli_out="${artifact_dir}/RSA_CLI_Linux"
-          bash scripts/bundle_linux_binary.sh "${cli_binary}" "${cli_out}"
-          (cd "${artifact_dir}" && tar -czf "RSA_CLI_Linux.tar.gz" "$(basename "${cli_out}")")
-        fi
-
-        if [[ -n "${gui_binary}" ]]; then
-          gui_out="${artifact_dir}/RSA_CPP_Linux"
-          bash scripts/bundle_linux_binary.sh "${gui_binary}" "${gui_out}"
-          (cd "${artifact_dir}" && tar -czf "RSA_CPP_Linux.tar.gz" "$(basename "${gui_out}")")
-        fi
-
-        find "${artifact_dir}" -maxdepth 1 -type d -name "RSA_*_Linux" -exec rm -rf {} +
-    - name: Bundle macOS artifacts
+        done
+    - name: Collect artifacts (macOS)
       if: matrix.os == 'macos-latest'
       shell: bash
       run: |
@@ -203,48 +213,15 @@ jobs:
         artifact_dir="${build_dir}/artifacts"
         mkdir -p "${artifact_dir}"
 
-        resolve_binary() {
-          local name="$1"
-          local dir="$2"
-          if [[ -f "${dir}/${name}" ]]; then
-            echo "${dir}/${name}"
-            return 0
+        for name in RSA_CLI RSA_CPP; do
+          if [[ -f "${build_dir}/${name}" ]]; then
+            cp "${build_dir}/${name}" "${artifact_dir}/${name}_macOS"
+          elif [[ -f "${build_dir}/Release/${name}" ]]; then
+            cp "${build_dir}/Release/${name}" "${artifact_dir}/${name}_macOS"
+          elif [[ -f "${build_dir}/${name}.app/Contents/MacOS/${name}" ]]; then
+            cp "${build_dir}/${name}.app/Contents/MacOS/${name}" "${artifact_dir}/${name}_macOS"
           fi
-          if [[ -f "${dir}/Release/${name}" ]]; then
-            echo "${dir}/Release/${name}"
-            return 0
-          fi
-          if [[ -f "${dir}/${name}.app/Contents/MacOS/${name}" ]]; then
-            echo "${dir}/${name}.app/Contents/MacOS/${name}"
-            return 0
-          fi
-          return 1
-        }
-
-        openssl_prefix="$(brew --prefix openssl@3)"
-        glfw_prefix="$(brew --prefix glfw)"
-
-        cli_binary="$(resolve_binary RSA_CLI "${build_dir}")"
-        gui_binary="$(resolve_binary RSA_CPP "${build_dir}")"
-
-        if [[ -z "${cli_binary}" && -z "${gui_binary}" ]]; then
-          echo "No macOS binaries found to bundle."
-          exit 1
-        fi
-
-        if [[ -n "${cli_binary}" ]]; then
-          cli_out="${artifact_dir}/RSA_CLI_macOS"
-          bash scripts/bundle_macos_binary.sh "${cli_binary}" "${cli_out}" "${openssl_prefix}" "-"
-          (cd "${artifact_dir}" && zip -qr "RSA_CLI_macOS.zip" "$(basename "${cli_out}")")
-        fi
-
-        if [[ -n "${gui_binary}" ]]; then
-          gui_out="${artifact_dir}/RSA_CPP_macOS"
-          bash scripts/bundle_macos_binary.sh "${gui_binary}" "${gui_out}" "${openssl_prefix}" "${glfw_prefix}"
-          (cd "${artifact_dir}" && zip -qr "RSA_CPP_macOS.zip" "$(basename "${gui_out}")")
-        fi
-
-        find "${artifact_dir}" -maxdepth 1 -type d -name "RSA_*_macOS" -exec rm -rf {} +
+        done
 
     - name: Collect artifacts (Windows)
       if: matrix.os == 'windows-latest'
