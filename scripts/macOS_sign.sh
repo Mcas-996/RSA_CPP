@@ -7,7 +7,7 @@ target_dir="$(pwd)"
 
 echo "Signing helper libraries and executables under $target_dir ..."
 
-find "$target_dir" -type f \( -name "*.dylib" -o -perm -u+x -o -perm -g+x -o -perm -o+x \) -print0 | while IFS= read -r -d '' file; do
+find "$target_dir" -type f \( -name "*.dylib" -o -name "*.lib" -o -name "*.a" -o -perm -u+x -o -perm -g+x -o -perm -o+x \) -print0 | while IFS= read -r -d '' file; do
     echo "Signing $file"
     codesign --force --sign - "$file"
 done
