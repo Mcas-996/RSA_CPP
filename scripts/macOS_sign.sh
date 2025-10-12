@@ -1,13 +1,13 @@
 #!/usr/bin/env bash
 set -euo pipefail
 
-# Usage: run this script from the unpacked directory that contains RSA_CLI / RSA_CPP and .dylib files.
+# Usage: run this script from the unpacked directory that contains RSA_CLI / RSA_CPP and the .dylib files.
 
 target_dir="$(pwd)"
 
 echo "Signing helper libraries and executables under $target_dir ..."
 
-find "$target_dir" -maxdepth 1 -type f \( -name "*.dylib" -o -perm -111 \) -print0 | while IFS= read -r -d '' file; do
+find "$target_dir" -type f \( -name "*.dylib" -o -perm -u+x -o -perm -g+x -o -perm -o+x \) -print0 | while IFS= read -r -d '' file; do
     echo "Signing $file"
     codesign --force --sign - "$file"
 done
