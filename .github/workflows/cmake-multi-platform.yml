@@ -1,4 +1,5 @@
-# This starter workflow is for a CMake project running on multiple platforms. There is a different starter workflow if you just want a single platform.
+# This starter workflow is for a CMake project running on multiple platforms. There is a different starter workflow if you just
+want a single platform.
 # See: https://github.com/actions/starter-workflows/blob/main/ci/cmake-single-platform.yml
 name: CMake on multiple platforms
 
@@ -9,234 +10,305 @@ on:
     branches: [ "main" ]
 
 jobs:
-  build:
-    runs-on: ${{ matrix.os }}
+  linux-x86-clang:
+    runs-on: ubuntu-latest
+    env:
+      BUILD_TYPE: Release
+      C_COMPILER: clang
+      CPP_COMPILER: clang++
+      ARTIFACT_SUFFIX: Linux-x86_64
+    steps: &linux_clang_steps
+      - uses: actions/checkout@v4
 
-    strategy:
-      # Set fail-fast to false to ensure that feedback is delivered for all matrix combinations. Consider changing this to true when your workflow is stable.
-      fail-fast: false
+      - name: Ensure cppcodec present
+        shell: bash
+        run: |
+          if [ ! -f third_party/cppcodec/cppcodec/base64_rfc4648.hpp ]; then
+            echo "cppcodec missing; cloning..."
+            rm -rf third_party/cppcodec
+            git clone --depth 1 https://github.com/tplgy/cppcodec.git third_party/cppcodec
+          fi
 
-      # Set up a matrix to run the following 3 configurations:
-      # 1. <Windows, Release, latest MSVC compiler toolchain on the default runner image, default generator>
-      # 2. <Linux, Release, latest GCC compiler toolchain on the default runner image, default generator>
-      # 3. <Linux, Release, latest Clang compiler toolchain on the default runner image, default generator>
-      #
-      # To add more build types (Release, Debug, RelWithDebInfo, etc.) customize the build_type list.
-      matrix:
-        build_type: [Release]
-        include:
-          - os: windows-latest
-            c_compiler: gcc
-            cpp_compiler: g++
-            msystem: MINGW64
-          - os: ubuntu-latest
-            c_compiler: clang
-            cpp_compiler: clang++
-          - os: macos-latest
-            c_compiler: clang
-            cpp_compiler: clang++
+      - name: Install dependencies (Linux)
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y build-essential libgl1-mesa-dev libx11-dev libxrandr-dev libxi-dev libxinerama-dev libxcursor-dev libglfw3-dev libssl-dev pkg-config
 
+      - name: Set reusable strings
+        id: strings
+        shell: bash
+        run: |
+          echo "build-output-dir=${{ github.workspace }}/build" >> "$GITHUB_OUTPUT"
+
+      - name: Configure CMake
+        run: |
+          cmake_args=(
+            -B "${{ steps.strings.outputs.build-output-dir }}"
+            -DCMAKE_CXX_COMPILER=$CPP_COMPILER
+            -DCMAKE_C_COMPILER=$C_COMPILER
+            -DCMAKE_BUILD_TYPE=$BUILD_TYPE
+          )
+          cmake_args+=("-DOPENSSL_USE_STATIC_LIBS=TRUE")
+          if [ -n "${OPENSSL_ROOT_DIR:-}" ]; then
+            cmake_args+=("-DOPENSSL_ROOT_DIR=${OPENSSL_ROOT_DIR}")
+          fi
+          if [ -n "${PKG_CONFIG_PATH:-}" ]; then
+            export PKG_CONFIG_PATH
+          fi
+          export PKG_CONFIG_ALL_STATIC=${PKG_CONFIG_ALL_STATIC:-1}
+          if [ -n "${CMAKE_PREFIX_PATH:-}" ]; then
+            export CMAKE_PREFIX_PATH
+          fi
+          if [[ "${{ runner.os }}" == "Linux" ]]; then
+            cmake_args+=("-DCMAKE_EXE_LINKER_FLAGS=-static-libstdc++ -static-libgcc")
+          fi
+          cmake_args+=(-S "${{ github.workspace }}")
+          cmake "${cmake_args[@]}"
+
+      - name: Build
+        run: cmake --build ${{ steps.strings.outputs.build-output-dir }} --config $BUILD_TYPE
+
+      - name: Test
+        working-directory: ${{ steps.strings.outputs.build-output-dir }}
+        run: ctest --build-config $BUILD_TYPE
+
+      - name: Collect artifacts
+        shell: bash
+        run: |
+          set -euo pipefail
+          build_dir="${{ steps.strings.outputs.build-output-dir }}"
+          artifact_dir="${build_dir}/artifacts"
+          mkdir -p "${artifact_dir}"
+
+          for name in RSA_CLI RSA_CPP; do
+            if [[ -f "${build_dir}/${name}" ]]; then
+              cp "${build_dir}/${name}" "${artifact_dir}/${name}_${ARTIFACT_SUFFIX}"
+            elif [[ -f "${build_dir}/Release/${name}" ]]; then
+              cp "${build_dir}/Release/${name}" "${artifact_dir}/${name}_${ARTIFACT_SUFFIX}"
+            fi
+          done
+
+      - name: Upload artifacts
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: RSA_CPP-${{ env.ARTIFACT_SUFFIX }}
+          path: ${{ steps.strings.outputs.build-output-dir }}/artifacts
+
+  linux-arm64-clang:
+    runs-on: ubuntu-22.04-arm
+    env:
+      BUILD_TYPE: Release
+      C_COMPILER: clang
+      CPP_COMPILER: clang++
+      ARTIFACT_SUFFIX: Linux-arm64
+    steps: *linux_clang_steps
+
+  mac-m-series-clang:
+    runs-on: macos-14
+    env:
+      BUILD_TYPE: Release
+      C_COMPILER: clang
+      CPP_COMPILER: clang++
+      ARTIFACT_SUFFIX: macOS-arm64
+    steps: &mac_clang_steps
+      - uses: actions/checkout@v4
+
+      - name: Ensure cppcodec present
+        shell: bash
+        run: |
+          if [ ! -f third_party/cppcodec/cppcodec/base64_rfc4648.hpp ]; then
+            echo "cppcodec missing; cloning..."
+            rm -rf third_party/cppcodec
+            git clone --depth 1 https://github.com/tplgy/cppcodec.git third_party/cppcodec
+          fi
+
+      - name: Prepare static deps (macOS)
+        shell: bash
+        run: |
+          set -euo pipefail
+          workdir="${{ runner.temp }}/deps"
+          mkdir -p "$workdir" && cd "$workdir"
+          curl -L -o openssl.tar.gz https://www.openssl.org/source/openssl-3.3.1.tar.gz
+          tar -xf openssl.tar.gz
+          cd openssl-3.3.1
+          arch=$(uname -m)
+          if [[ "$arch" == "arm64" ]]; then target=darwin64-arm64-cc; else target=darwin64-x86_64-cc; fi
+          ./Configure "$target" no-shared no-tests --prefix="$workdir/openssl-static"
+          make -j$(sysctl -n hw.logicalcpu)
+          make install_sw
+          echo "OPENSSL_ROOT_DIR=$workdir/openssl-static" >> "$GITHUB_ENV"
+
+          cd "$workdir"
+          git clone --depth 1 https://github.com/glfw/glfw.git
+          cmake -S glfw -B glfw/build \
+            -DCMAKE_BUILD_TYPE=Release \
+            -DBUILD_SHARED_LIBS=OFF \
+            -DGLFW_BUILD_DOCS=OFF -DGLFW_BUILD_TESTS=OFF -DGLFW_BUILD_EXAMPLES=OFF \
+            -DCMAKE_INSTALL_PREFIX="$workdir/glfw-static"
+          cmake --build glfw/build --config Release --target install -j
+          echo "PKG_CONFIG_PATH=$workdir/glfw-static/lib/pkgconfig" >> "$GITHUB_ENV"
+          echo "PKG_CONFIG_ALL_STATIC=1" >> "$GITHUB_ENV"
+          echo "CMAKE_PREFIX_PATH=$workdir/glfw-static" >> "$GITHUB_ENV"
+
+      - name: Set reusable strings
+        id: strings
+        shell: bash
+        run: |
+          echo "build-output-dir=${{ github.workspace }}/build" >> "$GITHUB_OUTPUT"
+
+      - name: Configure CMake
+        run: |
+          cmake_args=(
+            -B "${{ steps.strings.outputs.build-output-dir }}"
+            -DCMAKE_CXX_COMPILER=$CPP_COMPILER
+            -DCMAKE_C_COMPILER=$C_COMPILER
+            -DCMAKE_BUILD_TYPE=$BUILD_TYPE
+          )
+          cmake_args+=("-DOPENSSL_USE_STATIC_LIBS=TRUE")
+          if [ -n "${OPENSSL_ROOT_DIR:-}" ]; then
+            cmake_args+=("-DOPENSSL_ROOT_DIR=${OPENSSL_ROOT_DIR}")
+          fi
+          if [ -n "${PKG_CONFIG_PATH:-}" ]; then
+            export PKG_CONFIG_PATH
+          fi
+          export PKG_CONFIG_ALL_STATIC=${PKG_CONFIG_ALL_STATIC:-1}
+          if [ -n "${CMAKE_PREFIX_PATH:-}" ]; then
+            export CMAKE_PREFIX_PATH
+          fi
+          cmake_args+=(-S "${{ github.workspace }}")
+          cmake "${cmake_args[@]}"
+
+      - name: Build
+        run: cmake --build ${{ steps.strings.outputs.build-output-dir }} --config $BUILD_TYPE
+
+      - name: Test
+        working-directory: ${{ steps.strings.outputs.build-output-dir }}
+        run: ctest --build-config $BUILD_TYPE
+
+      - name: Collect artifacts
+        shell: bash
+        run: |
+          set -euo pipefail
+          build_dir="${{ steps.strings.outputs.build-output-dir }}"
+          artifact_dir="${build_dir}/artifacts"
+          mkdir -p "${artifact_dir}"
+
+          for name in RSA_CLI RSA_CPP; do
+            if [[ -f "${build_dir}/${name}" ]]; then
+              cp "${build_dir}/${name}" "${artifact_dir}/${name}_${ARTIFACT_SUFFIX}"
+            elif [[ -f "${build_dir}/Release/${name}" ]]; then
+              cp "${build_dir}/Release/${name}" "${artifact_dir}/${name}_${ARTIFACT_SUFFIX}"
+            elif [[ -f "${build_dir}/${name}.app/Contents/MacOS/${name}" ]]; then
+              cp "${build_dir}/${name}.app/Contents/MacOS/${name}" "${artifact_dir}/${name}_${ARTIFACT_SUFFIX}"
+            fi
+          done
+
+      - name: Upload artifacts
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: RSA_CPP-${{ env.ARTIFACT_SUFFIX }}
+          path: ${{ steps.strings.outputs.build-output-dir }}/artifacts
+
+  mac-intel-clang:
+    runs-on: macos-13
+    env:
+      BUILD_TYPE: Release
+      C_COMPILER: clang
+      CPP_COMPILER: clang++
+      ARTIFACT_SUFFIX: macOS-x86_64
+    steps: *mac_clang_steps
+
+  windows-clang:
+    runs-on: windows-latest
+    env:
+      BUILD_TYPE: Release
+      C_COMPILER: clang
+      CPP_COMPILER: clang++
+      ARTIFACT_SUFFIX: Windows-clang
+      MSYSTEM: CLANG64
     steps:
-    - uses: actions/checkout@v4
+      - uses: actions/checkout@v4
 
-    - name: Ensure cppcodec present
-      shell: bash
-      run: |
-        if [ ! -f third_party/cppcodec/cppcodec/base64_rfc4648.hpp ]; then
-          echo "cppcodec missing; cloning..."
-          rm -rf third_party/cppcodec
-          git clone --depth 1 https://github.com/tplgy/cppcodec.git third_party/cppcodec
-        fi
-
-    - name: Install dependencies (Linux)
-      if: matrix.os == 'ubuntu-latest'
-      run: |
-        sudo apt-get update
-        sudo apt-get install -y build-essential libgl1-mesa-dev libx11-dev libxrandr-dev libxi-dev libxinerama-dev libxcursor-dev libglfw3-dev libssl-dev pkg-config
-
-    - name: Prepare static deps (macOS)
-      if: matrix.os == 'macos-latest'
-      shell: bash
-      run: |
-        set -euo pipefail
-        # Build static OpenSSL
-        workdir="${{ runner.temp }}/deps"
-        mkdir -p "$workdir" && cd "$workdir"
-        curl -L -o openssl.tar.gz https://www.openssl.org/source/openssl-3.3.1.tar.gz
-        tar -xf openssl.tar.gz
-        cd openssl-3.3.1
-        arch=$(uname -m)
-        if [[ "$arch" == "arm64" ]]; then target=darwin64-arm64-cc; else target=darwin64-x86_64-cc; fi
-        ./Configure "$target" no-shared no-tests --prefix="$workdir/openssl-static"
-        make -j$(sysctl -n hw.logicalcpu)
-        make install_sw
-        echo "OPENSSL_ROOT_DIR=$workdir/openssl-static" >> "$GITHUB_ENV"
-
-        # Build static GLFW
-        cd "$workdir"
-        git clone --depth 1 https://github.com/glfw/glfw.git
-        cmake -S glfw -B glfw/build \
-          -DCMAKE_BUILD_TYPE=Release \
-          -DBUILD_SHARED_LIBS=OFF \
-          -DGLFW_BUILD_DOCS=OFF -DGLFW_BUILD_TESTS=OFF -DGLFW_BUILD_EXAMPLES=OFF \
-          -DCMAKE_INSTALL_PREFIX="$workdir/glfw-static"
-        cmake --build glfw/build --config Release --target install -j
-        echo "PKG_CONFIG_PATH=$workdir/glfw-static/lib/pkgconfig" >> "$GITHUB_ENV"
-        echo "PKG_CONFIG_ALL_STATIC=1" >> "$GITHUB_ENV"
-        echo "CMAKE_PREFIX_PATH=$workdir/glfw-static" >> "$GITHUB_ENV"
-
-    - name: Setup MSYS2 environment (Windows)
-      if: matrix.os == 'windows-latest'
-      uses: msys2/setup-msys2@v2
-      with:
-        msystem: ${{ matrix.msystem }}
-        update: true
-        install: >-
-          base-devel
-          git
-          mingw-w64-x86_64-gcc
-          mingw-w64-x86_64-cmake
-          mingw-w64-x86_64-ninja
-          mingw-w64-x86_64-openssl
-          mingw-w64-x86_64-glfw
-
-    - name: Set reusable strings
-      # Turn repeated input strings (such as the build output directory) into step outputs. These step outputs can be used throughout the workflow file.
-      id: strings
-      shell: bash
-      run: |
-        echo "build-output-dir=${{ github.workspace }}/build" >> "$GITHUB_OUTPUT"
-
-    - name: Configure CMake (Linux/macOS)
-      if: matrix.os != 'windows-latest'
-      # Configure CMake in a 'build' subdirectory. `CMAKE_BUILD_TYPE` is only required if you are using a single-configuration generator such as make.
-      # See https://cmake.org/cmake/help/latest/variable/CMAKE_BUILD_TYPE.html?highlight=cmake_build_type
-      run: |
-        cmake_args=(
-          -B "${{ steps.strings.outputs.build-output-dir }}"
-          -DCMAKE_CXX_COMPILER=${{ matrix.cpp_compiler }}
-          -DCMAKE_C_COMPILER=${{ matrix.c_compiler }}
-          -DCMAKE_BUILD_TYPE=${{ matrix.build_type }}
-        )
-        cmake_args+=("-DOPENSSL_USE_STATIC_LIBS=TRUE")
-        if [ -n "${OPENSSL_ROOT_DIR:-}" ]; then
-          cmake_args+=("-DOPENSSL_ROOT_DIR=${OPENSSL_ROOT_DIR}")
-        fi
-        # Prefer static glfw via pkg-config on Linux/macOS
-        if [ -n "${PKG_CONFIG_PATH:-}" ]; then
-          export PKG_CONFIG_PATH
-        fi
-        export PKG_CONFIG_ALL_STATIC=${PKG_CONFIG_ALL_STATIC:-1}
-        if [ -n "${CMAKE_PREFIX_PATH:-}" ]; then
-          export CMAKE_PREFIX_PATH
-        fi
-        # Slightly reduce runtime deps on Linux by static libstdc++/libgcc
-        if [[ "${{ runner.os }}" == "Linux" ]]; then
-          cmake_args+=("-DCMAKE_EXE_LINKER_FLAGS=-static-libstdc++ -static-libgcc")
-        fi
-        cmake_args+=(-S "${{ github.workspace }}")
-        cmake "${cmake_args[@]}"
-
-    - name: Configure CMake (Windows)
-      if: matrix.os == 'windows-latest'
-      shell: msys2 {0}
-      run: |
-        workspace=$(cygpath -u "$GITHUB_WORKSPACE")
-        export PKG_CONFIG_ALL_STATIC=1
-        cmake -G Ninja \
-          -B "$workspace/build" \
-          -S "$workspace" \
-          -DCMAKE_BUILD_TYPE=${{ matrix.build_type }} \
-          -DCMAKE_CXX_COMPILER=${{ matrix.cpp_compiler }} \
-          -DCMAKE_C_COMPILER=${{ matrix.c_compiler }} \
-          -DOPENSSL_ROOT_DIR=/mingw64 \
-          -DOPENSSL_USE_STATIC_LIBS=TRUE \
-          -DCMAKE_EXE_LINKER_FLAGS="-static -static-libstdc++ -static-libgcc"
-
-    - name: Build (Linux/macOS)
-      if: matrix.os != 'windows-latest'
-      # Build your program with the given configuration. Note that --config is needed because the default Windows generator is a multi-config generator (Visual Studio generator).
-      run: cmake --build ${{ steps.strings.outputs.build-output-dir }} --config ${{ matrix.build_type }}
-
-    - name: Build (Windows)
-      if: matrix.os == 'windows-latest'
-      shell: msys2 {0}
-      run: |
-        workspace=$(cygpath -u "$GITHUB_WORKSPACE")
-        cmake --build "$workspace/build" --config ${{ matrix.build_type }}
-
-    - name: Test (Linux/macOS)
-      if: matrix.os != 'windows-latest'
-      working-directory: ${{ steps.strings.outputs.build-output-dir }}
-      # Execute tests defined by the CMake configuration. Note that --build-config is needed because the default Windows generator is a multi-config generator (Visual Studio generator).
-      # See https://cmake.org/cmake/help/latest/manual/ctest.1.html for more detail
-      run: ctest --build-config ${{ matrix.build_type }}
-
-    - name: Test (Windows)
-      if: matrix.os == 'windows-latest'
-      shell: msys2 {0}
-      run: |
-        workspace=$(cygpath -u "$GITHUB_WORKSPACE")
-        cd "$workspace/build"
-        ctest --build-config ${{ matrix.build_type }}
-
-    - name: Collect artifacts (Linux)
-      if: matrix.os == 'ubuntu-latest'
-      shell: bash
-      run: |
-        set -euo pipefail
-        build_dir="${{ steps.strings.outputs.build-output-dir }}"
-        artifact_dir="${build_dir}/artifacts"
-        mkdir -p "${artifact_dir}"
-
-        for name in RSA_CLI RSA_CPP; do
-          if [[ -f "${build_dir}/${name}" ]]; then
-            cp "${build_dir}/${name}" "${artifact_dir}/${name}_Linux"
-          elif [[ -f "${build_dir}/Release/${name}" ]]; then
-            cp "${build_dir}/Release/${name}" "${artifact_dir}/${name}_Linux"
+      - name: Ensure cppcodec present
+        shell: bash
+        run: |
+          if [ ! -f third_party/cppcodec/cppcodec/base64_rfc4648.hpp ]; then
+            echo "cppcodec missing; cloning..."
+            rm -rf third_party/cppcodec
+            git clone --depth 1 https://github.com/tplgy/cppcodec.git third_party/cppcodec
           fi
-        done
-    - name: Collect artifacts (macOS)
-      if: matrix.os == 'macos-latest'
-      shell: bash
-      run: |
-        set -euo pipefail
-        build_dir="${{ steps.strings.outputs.build-output-dir }}"
-        artifact_dir="${build_dir}/artifacts"
-        mkdir -p "${artifact_dir}"
 
-        for name in RSA_CLI RSA_CPP; do
-          if [[ -f "${build_dir}/${name}" ]]; then
-            cp "${build_dir}/${name}" "${artifact_dir}/${name}_macOS"
-          elif [[ -f "${build_dir}/Release/${name}" ]]; then
-            cp "${build_dir}/Release/${name}" "${artifact_dir}/${name}_macOS"
-          elif [[ -f "${build_dir}/${name}.app/Contents/MacOS/${name}" ]]; then
-            cp "${build_dir}/${name}.app/Contents/MacOS/${name}" "${artifact_dir}/${name}_macOS"
+      - name: Setup MSYS2 environment
+        uses: msys2/setup-msys2@v2
+        with:
+          msystem: ${{ env.MSYSTEM }}
+          update: true
+          install: >-
+            base-devel
+            git
+            mingw-w64-clang-x86_64-toolchain
+            mingw-w64-clang-x86_64-cmake
+            mingw-w64-clang-x86_64-ninja
+            mingw-w64-clang-x86_64-openssl
+            mingw-w64-clang-x86_64-glfw
+
+      - name: Set reusable strings
+        id: strings
+        shell: bash
+        run: |
+          echo "build-output-dir=${{ github.workspace }}/build" >> "$GITHUB_OUTPUT"
+
+      - name: Configure CMake
+        shell: msys2 {0}
+        run: |
+          workspace=$(cygpath -u "$GITHUB_WORKSPACE")
+          export PKG_CONFIG_PATH=/clang64/lib/pkgconfig
+          export PKG_CONFIG_ALL_STATIC=1
+          cmake -G Ninja \
+            -B "$workspace/build" \
+            -S "$workspace" \
+            -DCMAKE_BUILD_TYPE=$BUILD_TYPE \
+            -DCMAKE_CXX_COMPILER=$CPP_COMPILER \
+            -DCMAKE_C_COMPILER=$C_COMPILER \
+            -DOPENSSL_ROOT_DIR=/clang64 \
+            -DOPENSSL_USE_STATIC_LIBS=TRUE
+
+      - name: Build
+        shell: msys2 {0}
+        run: |
+          workspace=$(cygpath -u "$GITHUB_WORKSPACE")
+          cmake --build "$workspace/build" --config $BUILD_TYPE
+
+      - name: Test
+        shell: msys2 {0}
+        run: |
+          workspace=$(cygpath -u "$GITHUB_WORKSPACE")
+          cd "$workspace/build"
+          ctest --build-config $BUILD_TYPE
+
+      - name: Collect artifacts
+        shell: msys2 {0}
+        run: |
+          workspace=$(cygpath -u "$GITHUB_WORKSPACE")
+          build_dir="$workspace/build"
+          artifact_dir="$build_dir/artifacts"
+          mkdir -p "$artifact_dir"
+          for target in RSA_CPP RSA_CLI; do
+            if [ -f "$build_dir/${target}.exe" ]; then
+              cp "$build_dir/${target}.exe" "$artifact_dir/${target}_${ARTIFACT_SUFFIX}.exe"
+            elif [ -f "$build_dir/Release/${target}.exe" ]; then
+              cp "$build_dir/Release/${target}.exe" "$artifact_dir/${target}_${ARTIFACT_SUFFIX}.exe"
+            fi
+          done
+          if [ -z "$(ls -A "$artifact_dir")" ]; then
+            echo "No binaries found; creating placeholder to keep artifact step happy." > "$artifact_dir/NO_ARTIFACTS.txt"
           fi
-        done
 
-    - name: Collect artifacts (Windows)
-      if: matrix.os == 'windows-latest'
-      shell: msys2 {0}
-      run: |
-        workspace=$(cygpath -u "$GITHUB_WORKSPACE")
-        build_dir="$workspace/build"
-        artifact_dir="$build_dir/artifacts"
-        mkdir -p "$artifact_dir"
-        for target in RSA_CPP RSA_CLI; do
-          if [ -f "$build_dir/${target}.exe" ]; then
-            cp "$build_dir/${target}.exe" "$artifact_dir/${target}_Windows.exe"
-          elif [ -f "$build_dir/Release/${target}.exe" ]; then
-            cp "$build_dir/Release/${target}.exe" "$artifact_dir/${target}_Windows.exe"
-          fi
-        done
-        if [ -z "$(ls -A "$artifact_dir")" ]; then
-          echo "No binaries found; creating placeholder to keep artifact step happy." > "$artifact_dir/NO_ARTIFACTS.txt"
-        fi
-
-    - name: Upload artifacts
-      if: always()
-      uses: actions/upload-artifact@v4
-      with:
-        name: RSA_CPP-${{ matrix.os }}-${{ matrix.c_compiler }}
-        path: ${{ steps.strings.outputs.build-output-dir }}/artifacts
+      - name: Upload artifacts
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: RSA_CPP-${{ env.ARTIFACT_SUFFIX }}
+          path: ${{ steps.strings.outputs.build-output-dir }}/artifacts
