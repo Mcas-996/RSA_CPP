@@ -1,24 +1,13 @@
 #!/usr/bin/env bash
 set -euo pipefail
 
-# Usage: ./macOS_sign.sh <directory-with-RSA-binaries>
-# Example: ./macOS_sign.sh RSA_CLI_macOS
+# Usage: run this script from the unpacked directory that contains RSA_CLI / RSA_CPP and .dylib files.
 
-if [[ $# -ne 1 ]]; then
-    echo "Usage: $0 <directory-with-RSA-binaries>" >&2
-    exit 1
-fi
-
-target_dir="$1"
-
-if [[ ! -d "$target_dir" ]]; then
-    echo "Directory not found: $target_dir" >&2
-    exit 1
-fi
+target_dir="$(pwd)"
 
 echo "Signing helper libraries and executables under $target_dir ..."
 
-find "$target_dir" -type f \( -name "*.dylib" -o -perm -111 \) -print0 | while IFS= read -r -d '' file; do
+find "$target_dir" -maxdepth 1 -type f \( -name "*.dylib" -o -perm -111 \) -print0 | while IFS= read -r -d '' file; do
     echo "Signing $file"
     codesign --force --sign - "$file"
 done

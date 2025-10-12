@@ -64,6 +64,8 @@ else()
     target_compile_definitions(RSA_CPP PRIVATE HAS_GLFW)
     if(APPLE)
         target_link_options(RSA_CPP PRIVATE "-Wl,-rpath,@loader_path")
+    elseif(UNIX)
+        target_link_options(RSA_CPP PRIVATE "-Wl,-rpath,\\$ORIGIN")
     endif()
 endif()
 
@@ -133,6 +135,10 @@ target_include_directories(RSA_CLI PRIVATE
 
 target_link_libraries(RSA_CLI PRIVATE OpenSSL::Crypto)
 
+if(UNIX AND NOT APPLE)
+    target_link_options(RSA_CLI PRIVATE "-Wl,-rpath,\\$ORIGIN")
+endif()
+
 if(APPLE)
     set_target_properties(RSA_CPP PROPERTIES
         MACOSX_RPATH ON
@@ -143,5 +149,14 @@ if(APPLE)
         MACOSX_RPATH ON
         BUILD_WITH_INSTALL_RPATH TRUE
         INSTALL_RPATH "@loader_path"
+    )
+elseif(UNIX)
+    set_target_properties(RSA_CPP PROPERTIES
+        BUILD_WITH_INSTALL_RPATH TRUE
+        INSTALL_RPATH "\$ORIGIN"
+    )
+    set_target_properties(RSA_CLI PROPERTIES
+        BUILD_WITH_INSTALL_RPATH TRUE
+        INSTALL_RPATH "\$ORIGIN"
     )
 endif()

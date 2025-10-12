@@ -62,7 +62,7 @@ jobs:
       if: matrix.os == 'ubuntu-latest'
       run: |
         sudo apt-get update
-        sudo apt-get install -y build-essential libgl1-mesa-dev libglfw3-dev libssl-dev pkg-config
+        sudo apt-get install -y build-essential libgl1-mesa-dev libglfw3-dev libssl-dev pkg-config patchelf
 
     - name: Install dependencies (macOS)
       if: matrix.os == 'macos-latest'
@@ -150,25 +150,50 @@ jobs:
         cd "$workspace/build"
         ctest --build-config ${{ matrix.build_type }}
 
-    - name: Collect artifacts (Linux)
+    - name: Bundle Linux artifacts
       if: matrix.os == 'ubuntu-latest'
+      shell: bash
       run: |
+        set -euo pipefail
         build_dir="${{ steps.strings.outputs.build-output-dir }}"
         artifact_dir="${build_dir}/artifacts"
         mkdir -p "${artifact_dir}"
-        for target in RSA_CPP RSA_CLI; do
-          if [ -f "${build_dir}/${target}" ]; then
-            cp "${build_dir}/${target}" "${artifact_dir}/${target}_${{ runner.os }}"
-          elif [ -f "${build_dir}/Release/${target}" ]; then
-            cp "${build_dir}/Release/${target}" "${artifact_dir}/${target}_${{ runner.os }}"
-          elif [ -f "${build_dir}/${target}.app/Contents/MacOS/${target}" ]; then
-            cp "${build_dir}/${target}.app/Contents/MacOS/${target}" "${artifact_dir}/${target}_${{ runner.os }}"
+
+        resolve_binary() {
+          local name="$1"
+          local dir="$2"
+          if [[ -f "${dir}/${name}" ]]; then
+            echo "${dir}/${name}"
+            return 0
           fi
-        done
-        if [ -z "$(ls -A "${artifact_dir}")" ]; then
-          echo "No binaries found; creating placeholder to keep artifact step happy."
-          echo "Build produced no binaries to archive." > "${artifact_dir}/NO_ARTIFACTS.txt"
+          if [[ -f "${dir}/Release/${name}" ]]; then
+            echo "${dir}/Release/${name}"
+            return 0
+          fi
+          return 1
+        }
+
+        cli_binary="$(resolve_binary RSA_CLI "${build_dir}")"
+        gui_binary="$(resolve_binary RSA_CPP "${build_dir}")"
+
+        if [[ -z "${cli_binary}" && -z "${gui_binary}" ]]; then
+          echo "No Linux binaries found to bundle."
+          exit 1
         fi
+
+        if [[ -n "${cli_binary}" ]]; then
+          cli_out="${artifact_dir}/RSA_CLI_Linux"
+          bash scripts/bundle_linux_binary.sh "${cli_binary}" "${cli_out}"
+          (cd "${artifact_dir}" && tar -czf "RSA_CLI_Linux.tar.gz" "$(basename "${cli_out}")")
+        fi
+
+        if [[ -n "${gui_binary}" ]]; then
+          gui_out="${artifact_dir}/RSA_CPP_Linux"
+          bash scripts/bundle_linux_binary.sh "${gui_binary}" "${gui_out}"
+          (cd "${artifact_dir}" && tar -czf "RSA_CPP_Linux.tar.gz" "$(basename "${gui_out}")")
+        fi
+
+        find "${artifact_dir}" -maxdepth 1 -type d -name "RSA_*_Linux" -exec rm -rf {} +
     - name: Bundle macOS artifacts
       if: matrix.os == 'macos-latest'
       shell: bash
