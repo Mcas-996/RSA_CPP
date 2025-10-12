@@ -19,6 +19,13 @@ while IFS= read -r -d '' file; do
     echo "Signing $file"
     codesign --force --sign - --timestamp=none "$file"
     codesign --verify --verbose=2 "$file"
+    if command -v spctl >/dev/null 2>&1; then
+        if sudo -n true 2>/dev/null; then
+            sudo spctl --add --label "RSA_CPP_Local" "$file" || true
+        else
+            spctl --add --label "RSA_CPP_Local" "$file" || true
+        fi
+    fi
 done
 
 main_bin_candidates=()
@@ -34,7 +41,11 @@ for bin in "${main_bin_candidates[@]}"; do
     codesign --force --deep --sign - --timestamp=none "$bin"
     codesign --verify --deep --strict --verbose=2 "$bin"
     if command -v spctl >/dev/null 2>&1; then
-        spctl --add --label "RSA_CPP_Local" "$bin" 2>/dev/null || true
+        if sudo -n true 2>/dev/null; then
+            sudo spctl --add --label "RSA_CPP_Local" "$bin" || true
+        else
+            spctl --add --label "RSA_CPP_Local" "$bin" || true
+        fi
     fi
 done
 
