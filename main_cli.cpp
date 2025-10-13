@@ -13,13 +13,16 @@
 #include <string>
 #include <vector>
 
+using std::string;
+using std::vector;
+
 namespace {
 
-std::string encodeCiphertextBase64(const std::vector<long long>& values) {
+string encodeCiphertextBase64(const vector<long long>& values) {
     if (values.empty()) {
         return {};
     }
-    std::vector<uint8_t> bytes;
+    vector<uint8_t> bytes;
     bytes.reserve(values.size() * sizeof(uint64_t));
     for (long long value : values) {
         uint64_t uvalue = static_cast<uint64_t>(value);
@@ -30,12 +33,12 @@ std::string encodeCiphertextBase64(const std::vector<long long>& values) {
     return cppcodec::base64_rfc4648::encode(bytes);
 }
 
-std::vector<long long> decodeCiphertextBase64(const std::string& encoded) {
-    std::vector<uint8_t> bytes = cppcodec::base64_rfc4648::decode(encoded);
+vector<long long> decodeCiphertextBase64(const string& encoded) {
+    vector<uint8_t> bytes = cppcodec::base64_rfc4648::decode(encoded);
     if (bytes.size() % sizeof(uint64_t) != 0) {
         throw std::invalid_argument("Base64 ciphertext length mismatch");
     }
-    std::vector<long long> values(bytes.size() / sizeof(uint64_t));
+    vector<long long> values(bytes.size() / sizeof(uint64_t));
     for (size_t i = 0; i < values.size(); ++i) {
         uint64_t value = 0;
         for (int byte = 0; byte < 8; ++byte) {
@@ -46,8 +49,8 @@ std::vector<long long> decodeCiphertextBase64(const std::string& encoded) {
     return values;
 }
 
-std::string stripWhitespace(const std::string& input) {
-    std::string cleaned;
+string stripWhitespace(const string& input) {
+    string cleaned;
     cleaned.reserve(input.size());
     for (unsigned char c : input) {
         if (!std::isspace(c)) {
@@ -57,14 +60,14 @@ std::string stripWhitespace(const std::string& input) {
     return cleaned;
 }
 
-bool isNumericCiphertext(const std::string& input) {
+bool isNumericCiphertext(const string& input) {
     if (input.empty()) {
         return true;
     }
-    return input.find_first_not_of("0123456789,-") == std::string::npos;
+    return input.find_first_not_of("0123456789,-") == string::npos;
 }
 
-std::string trim(const std::string& input) {
+string trim(const string& input) {
     const auto begin = std::find_if_not(input.begin(), input.end(), [](unsigned char c) {
         return std::isspace(c);
     });
@@ -74,10 +77,10 @@ std::string trim(const std::string& input) {
     if (begin >= end) {
         return {};
     }
-    return std::string(begin, end);
+    return string(begin, end);
 }
 
-std::string stripSurroundingQuotes(const std::string& input) {
+string stripSurroundingQuotes(const string& input) {
     if (input.size() >= 2) {
         const char first = input.front();
         const char last = input.back();
@@ -88,8 +91,8 @@ std::string stripSurroundingQuotes(const std::string& input) {
     return input;
 }
 
-std::vector<long long> parseCiphertext(const std::string& input) {
-    const std::string cleaned = stripWhitespace(input);
+vector<long long> parseCiphertext(const string& input) {
+    const string cleaned = stripWhitespace(input);
     if (cleaned.empty()) {
         return {};
     }
@@ -103,23 +106,23 @@ std::vector<long long> parseCiphertext(const std::string& input) {
     }
 }
 
-std::string encodeBase64(const std::vector<uint8_t>& data) {
+string encodeBase64(const vector<uint8_t>& data) {
     if (data.empty()) {
         return {};
     }
     return cppcodec::base64_rfc4648::encode(data);
 }
 
-std::vector<uint8_t> decodeBase64(const std::string& text) {
+vector<uint8_t> decodeBase64(const string& text) {
     return cppcodec::base64_rfc4648::decode(stripWhitespace(text));
 }
 
-std::string readTextFile(const std::filesystem::path& path) {
+string readTextFile(const std::filesystem::path& path) {
     std::ifstream input(path, std::ios::binary);
     if (!input.is_open()) {
         throw std::runtime_error("Unable to open text file: " + path.string());
     }
-    return std::string(std::istreambuf_iterator<char>(input), std::istreambuf_iterator<char>());
+    return string(std::istreambuf_iterator<char>(input), std::istreambuf_iterator<char>());
 }
 
 enum class Mode {
@@ -143,7 +146,7 @@ struct PemState {
     int keyBits = 2048;
 };
 
-int readInt(const std::string& prompt, int minValue, int maxValue) {
+int readInt(const string& prompt, int minValue, int maxValue) {
     while (true) {
         std::cout << prompt;
         int value;
@@ -161,9 +164,9 @@ int readInt(const std::string& prompt, int minValue, int maxValue) {
     }
 }
 
-std::string readLine(const std::string& prompt) {
+string readLine(const string& prompt) {
     std::cout << prompt;
-    std::string line;
+    string line;
     std::getline(std::cin, line);
     return line;
 }
@@ -181,7 +184,7 @@ int main() {
     LegacyState legacy;
     PemState pem;
     Mode mode = Mode::Pem;
-    std::string result;
+    string result;
 
     while (true) {
         printSeparator();
@@ -216,7 +219,7 @@ int main() {
                 std::cout << "Generated legacy key pair." << std::endl;
                 RSAUtil::printKeyInfo(legacy.keyPair);
             } else {
-                std::string bitsInput = stripWhitespace(readLine("Enter key size in bits (>=512, default " + std::to_string(pem.keyBits) + "): "));
+                string bitsInput = stripWhitespace(readLine("Enter key size in bits (>=512, default " + std::to_string(pem.keyBits) + "): "));
                 int bits = pem.keyBits;
                 if (!bitsInput.empty()) {
                     try {
@@ -250,13 +253,13 @@ int main() {
                 std::cout << "Legacy key stored." << std::endl;
             } else {
                 try {
-                    std::string publicPath = trim(readLine("Enter public key PEM path: "));
+                    string publicPath = trim(readLine("Enter public key PEM path: "));
                     if (publicPath.empty()) {
                         throw std::runtime_error("Public key path may not be empty");
                     }
-                    const std::string publicPem = readTextFile(publicPath);
-                    std::string privatePath = trim(readLine("Enter private key PEM path (optional, needed for decrypt): "));
-                    std::string privatePem;
+                    const string publicPem = readTextFile(publicPath);
+                    string privatePath = trim(readLine("Enter private key PEM path (optional, needed for decrypt): "));
+                    string privatePem;
                     if (!privatePath.empty()) {
                         privatePem = readTextFile(privatePath);
                     }
@@ -314,9 +317,9 @@ int main() {
                     std::cout << "Generate or import legacy keys first." << std::endl;
                     break;
                 }
-                const std::string plaintext = readLine("Text to encrypt: ");
+                const string plaintext = readLine("Text to encrypt: ");
                 try {
-                    std::vector<long long> encrypted = RSAUtil::encryptText(plaintext, legacy.keyPair);
+                    vector<long long> encrypted = RSAUtil::encryptText(plaintext, legacy.keyPair);
                     result = encodeCiphertextBase64(encrypted);
                     std::cout << "Encryption complete. Base64 ciphertext:\n" << result << std::endl;
                 } catch (const std::exception& e) {
@@ -327,9 +330,9 @@ int main() {
                     std::cout << "Load or generate a PEM public key first." << std::endl;
                     break;
                 }
-                const std::string plaintext = readLine("Text to encrypt: ");
+                const string plaintext = readLine("Text to encrypt: ");
                 try {
-                    const std::vector<uint8_t> encrypted = RSAUtil::encryptTextToBytes(plaintext, pem.keyPair);
+                    const vector<uint8_t> encrypted = RSAUtil::encryptTextToBytes(plaintext, pem.keyPair);
                     result = encodeBase64(encrypted);
                     std::cout << "Encryption complete. Base64 ciphertext:\n" << result << std::endl;
                 } catch (const std::exception& e) {
@@ -344,10 +347,10 @@ int main() {
                     std::cout << "Generate or import legacy keys first." << std::endl;
                     break;
                 }
-                std::string ciphertextInput = readLine("Enter Base64 ciphertext or comma-separated numbers: ");
+                string ciphertextInput = readLine("Enter Base64 ciphertext or comma-separated numbers: ");
                 try {
-                    const std::vector<long long> encrypted = parseCiphertext(ciphertextInput);
-                    const std::string decrypted = RSAUtil::decryptText(encrypted, legacy.keyPair);
+                    const vector<long long> encrypted = parseCiphertext(ciphertextInput);
+                    const string decrypted = RSAUtil::decryptText(encrypted, legacy.keyPair);
                     result = decrypted;
                     std::cout << "Decrypted text: \"" << decrypted << "\"" << std::endl;
                 } catch (const std::exception& e) {
@@ -358,10 +361,10 @@ int main() {
                     std::cout << "Private key not loaded; cannot decrypt." << std::endl;
                     break;
                 }
-                const std::string ciphertext = readLine("Enter Base64 ciphertext: ");
+                const string ciphertext = readLine("Enter Base64 ciphertext: ");
                 try {
-                    const std::vector<uint8_t> bytes = decodeBase64(ciphertext);
-                    const std::string decrypted = RSAUtil::decryptTextFromBytes(bytes, pem.keyPair);
+                    const vector<uint8_t> bytes = decodeBase64(ciphertext);
+                    const string decrypted = RSAUtil::decryptTextFromBytes(bytes, pem.keyPair);
                     result = decrypted;
                     std::cout << "Decryption complete. Plaintext:\n" << decrypted << std::endl;
                 } catch (const std::exception& e) {
@@ -371,7 +374,7 @@ int main() {
             break;
         }
         case 7: {
-            std::string dataToSave = readLine("String to save (leave empty to reuse last result): ");
+            string dataToSave = readLine("String to save (leave empty to reuse last result): ");
             if (dataToSave.empty()) {
                 if (result.empty()) {
                     std::cout << "Nothing to save." << std::endl;
@@ -380,7 +383,7 @@ int main() {
                 dataToSave = result;
                 std::cout << "Using last result." << std::endl;
             }
-            const std::string targetPath = stripSurroundingQuotes(trim(readLine("Target file path: ")));
+            const string targetPath = stripSurroundingQuotes(trim(readLine("Target file path: ")));
             try {
                 WriteStringToBinaryFile(targetPath, dataToSave);
                 std::cout << "Saved to: " << targetPath << std::endl;
@@ -390,23 +393,23 @@ int main() {
             break;
         }
         case 8: {
-            const std::string sourcePath = stripSurroundingQuotes(trim(readLine("Source binary file path: ")));
+            const string sourcePath = stripSurroundingQuotes(trim(readLine("Source binary file path: ")));
             try {
-                const std::string binaryData = ReadBinaryFileToString(sourcePath);
+                const string binaryData = ReadBinaryFileToString(sourcePath);
                 if (mode == Mode::Legacy) {
                     if (!legacy.hasKey) {
                         std::cout << "Generate or import legacy keys first." << std::endl;
                         break;
                     }
-                    const std::vector<long long> encrypted = RSAUtil::encryptText(binaryData, legacy.keyPair);
+                    const vector<long long> encrypted = RSAUtil::encryptText(binaryData, legacy.keyPair);
                     result = encodeCiphertextBase64(encrypted);
                 } else {
                     if (!pem.hasPublic) {
                         std::cout << "Load or generate a PEM public key first." << std::endl;
                         break;
                     }
-                    const std::vector<uint8_t> plainBytes(binaryData.begin(), binaryData.end());
-                    const std::vector<uint8_t> encrypted = RSAUtil::encryptBytes(plainBytes, pem.keyPair);
+                    const vector<uint8_t> plainBytes(binaryData.begin(), binaryData.end());
+                    const vector<uint8_t> encrypted = RSAUtil::encryptBytes(plainBytes, pem.keyPair);
                     result = encodeBase64(encrypted);
                 }
                 std::cout << "Encryption complete. Base64 ciphertext:\n" << result << std::endl;
@@ -416,15 +419,15 @@ int main() {
             break;
         }
         case 9: {
-            const std::string ciphertextInput = readLine("Enter Base64 ciphertext (whitespace ignored): ");
+            const string ciphertextInput = readLine("Enter Base64 ciphertext (whitespace ignored): ");
             try {
                 if (mode == Mode::Legacy) {
                     if (!legacy.hasKey) {
                         std::cout << "Generate or import legacy keys first." << std::endl;
                         break;
                     }
-                    const std::vector<long long> encrypted = parseCiphertext(ciphertextInput);
-                    const std::string decrypted = RSAUtil::decryptText(encrypted, legacy.keyPair);
+                    const vector<long long> encrypted = parseCiphertext(ciphertextInput);
+                    const string decrypted = RSAUtil::decryptText(encrypted, legacy.keyPair);
                     result = decrypted;
                     std::cout << "Decryption complete." << std::endl;
                 } else {
@@ -432,13 +435,13 @@ int main() {
                         std::cout << "Private key not loaded; cannot decrypt." << std::endl;
                         break;
                     }
-                    const std::vector<uint8_t> cipherBytes = decodeBase64(ciphertextInput);
-                    const std::vector<uint8_t> plainBytes = RSAUtil::decryptBytes(cipherBytes, pem.keyPair);
+                    const vector<uint8_t> cipherBytes = decodeBase64(ciphertextInput);
+                    const vector<uint8_t> plainBytes = RSAUtil::decryptBytes(cipherBytes, pem.keyPair);
                     result.assign(plainBytes.begin(), plainBytes.end());
                     std::cout << "Decryption complete. Use option 7 to save the data." << std::endl;
                     if (!plainBytes.empty()) {
                         const size_t previewLen = std::min<size_t>(plainBytes.size(), 32);
-                        const std::string preview = cppcodec::base64_rfc4648::encode(plainBytes.data(), previewLen);
+                        const string preview = cppcodec::base64_rfc4648::encode(plainBytes.data(), previewLen);
                         std::cout << "Base64 preview (first " << previewLen << " bytes): " << preview;
                         if (plainBytes.size() > previewLen) {
                             std::cout << "...";
@@ -452,11 +455,11 @@ int main() {
             break;
         }
         case 10: {
-            const std::string sourcePath = stripSurroundingQuotes(trim(readLine("Binary file path: ")));
+            const string sourcePath = stripSurroundingQuotes(trim(readLine("Binary file path: ")));
             try {
                 result = ReadBinaryFileToString(sourcePath);
                 const size_t previewLen = std::min<size_t>(result.size(), 32);
-                const std::string preview = cppcodec::base64_rfc4648::encode(
+                const string preview = cppcodec::base64_rfc4648::encode(
                     reinterpret_cast<const uint8_t*>(result.data()),
                     previewLen);
                 std::cout << "Loaded file, " << result.size() << " bytes." << std::endl;
@@ -478,9 +481,9 @@ int main() {
                     std::cout << "Generate or import legacy keys first." << std::endl;
                     break;
                 }
-                const std::string publicPath = stripSurroundingQuotes(trim(readLine("Path to save public exponent (e) [leave blank to skip]: ")));
-                const std::string privatePath = stripSurroundingQuotes(trim(readLine("Path to save private exponent (d) [leave blank to skip]: ")));
-                const std::string modulusPath = stripSurroundingQuotes(trim(readLine("Path to save modulus (n) [leave blank to skip]: ")));
+                const string publicPath = stripSurroundingQuotes(trim(readLine("Path to save public exponent (e) [leave blank to skip]: ")));
+                const string privatePath = stripSurroundingQuotes(trim(readLine("Path to save private exponent (d) [leave blank to skip]: ")));
+                const string modulusPath = stripSurroundingQuotes(trim(readLine("Path to save modulus (n) [leave blank to skip]: ")));
                 bool savedAny = false;
                 try {
                     if (!publicPath.empty()) {
@@ -509,8 +512,8 @@ int main() {
                     std::cout << "No PEM keys loaded. Generate or import keys first." << std::endl;
                     break;
                 }
-                const std::string publicPath = stripSurroundingQuotes(trim(readLine("Path to save public key PEM [leave blank to skip]: ")));
-                const std::string privatePath = stripSurroundingQuotes(trim(readLine("Path to save private key PEM [leave blank to skip]: ")));
+                const string publicPath = stripSurroundingQuotes(trim(readLine("Path to save public key PEM [leave blank to skip]: ")));
+                const string privatePath = stripSurroundingQuotes(trim(readLine("Path to save private key PEM [leave blank to skip]: ")));
                 bool savedAny = false;
                 try {
                     if (!publicPath.empty()) {
@@ -549,16 +552,16 @@ int main() {
                 std::cout << "Load or generate a PEM public key first." << std::endl;
                 break;
             }
-            const std::string sourcePath = stripSurroundingQuotes(trim(readLine("Source file path (plaintext): ")));
-            const std::string targetPath = stripSurroundingQuotes(trim(readLine("Target file path (ciphertext output): ")));
+            const string sourcePath = stripSurroundingQuotes(trim(readLine("Source file path (plaintext): ")));
+            const string targetPath = stripSurroundingQuotes(trim(readLine("Target file path (ciphertext output): ")));
             try {
-                const std::string binaryData = ReadBinaryFileToString(sourcePath);
+                const string binaryData = ReadBinaryFileToString(sourcePath);
                 if (mode == Mode::Legacy) {
-                    const std::vector<long long> encrypted = RSAUtil::encryptText(binaryData, legacy.keyPair);
+                    const vector<long long> encrypted = RSAUtil::encryptText(binaryData, legacy.keyPair);
                     result = encodeCiphertextBase64(encrypted);
                 } else {
-                    const std::vector<uint8_t> plainBytes(binaryData.begin(), binaryData.end());
-                    const std::vector<uint8_t> encrypted = RSAUtil::encryptBytes(plainBytes, pem.keyPair);
+                    const vector<uint8_t> plainBytes(binaryData.begin(), binaryData.end());
+                    const vector<uint8_t> encrypted = RSAUtil::encryptBytes(plainBytes, pem.keyPair);
                     result = encodeBase64(encrypted);
                 }
                 WriteStringToBinaryFile(targetPath, result);
@@ -577,16 +580,16 @@ int main() {
                 std::cout << "Private key not loaded; cannot decrypt." << std::endl;
                 break;
             }
-            const std::string cipherPath = stripSurroundingQuotes(trim(readLine("Ciphertext file path: ")));
-            const std::string targetPath = stripSurroundingQuotes(trim(readLine("Target file path (plaintext output): ")));
+            const string cipherPath = stripSurroundingQuotes(trim(readLine("Ciphertext file path: ")));
+            const string targetPath = stripSurroundingQuotes(trim(readLine("Target file path (plaintext output): ")));
             try {
-                const std::string cipherData = ReadBinaryFileToString(cipherPath);
+                const string cipherData = ReadBinaryFileToString(cipherPath);
                 if (mode == Mode::Legacy) {
-                    const std::vector<long long> encrypted = parseCiphertext(cipherData);
+                    const vector<long long> encrypted = parseCiphertext(cipherData);
                     result = RSAUtil::decryptText(encrypted, legacy.keyPair);
                 } else {
-                    const std::vector<uint8_t> cipherBytes = decodeBase64(cipherData);
-                    const std::vector<uint8_t> plainBytes = RSAUtil::decryptBytes(cipherBytes, pem.keyPair);
+                    const vector<uint8_t> cipherBytes = decodeBase64(cipherData);
+                    const vector<uint8_t> plainBytes = RSAUtil::decryptBytes(cipherBytes, pem.keyPair);
                     result.assign(plainBytes.begin(), plainBytes.end());
                 }
                 WriteStringToBinaryFile(targetPath, result);
