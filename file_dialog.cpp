@@ -2,6 +2,7 @@
 
 #include <optional>
 #include <string>
+#include <vector>
 
 #ifdef _WIN32
 
@@ -109,14 +110,252 @@ std::optional<std::string> save_file(const char* title, const char* filter) {
 
 #else  // _WIN32
 
-namespace platform::dialog {
+#include <array>
+#include <cstdio>
+#include <cstdlib>
+#include <cstring>
+#include <memory>
 
-std::optional<std::string> open_file(const char*, const char*) {
-    return std::nullopt;
+namespace {
+
+std::vector<std::string> split_filter_tokens(const char* filter) {
+    std::vector<std::string> tokens;
+    if (!filter || !*filter)
+        return tokens;
+
+    std::string current;
+    for (const char* p = filter; *p; ++p) {
+        if (*p == '|') {
+            tokens.push_back(current);
+            current.clear();
+        } else {
+            current.push_back(*p);
+        }
+    }
+    tokens.push_back(current);
+    return tokens;
 }
 
-std::optional<std::string> save_file(const char*, const char*) {
+std::vector<std::string> extract_filter_patterns(const char* filter) {
+    const std::vector<std::string> tokens = split_filter_tokens(filter);
+
+    std::vector<std::string> patterns;
+    bool expectPattern = false;
+    for (const std::string& token : tokens) {
+        if (token.empty())
+            continue;
+        if (expectPattern || token.find('*') != std::string::npos || token.find('?') != std::string::npos) {
+            patterns.push_back(token);
+        }
+        expectPattern = !expectPattern;
+    }
+
+    if (patterns.empty()) {
+        patterns.emplace_back("*");
+    }
+    return patterns;
+}
+
+#if defined(__APPLE__)
+
+std::string escape_applescript(const std::string& input) {
+    std::string escaped;
+    for (char c : input) {
+        if (c == '"') {
+            escaped += "\\\"";
+        } else if (c == '\\') {
+            escaped += "\\\\";
+        } else {
+            escaped.push_back(c);
+        }
+    }
+    return escaped;
+}
+
+std::optional<std::string> run_applescript(const std::string& script) {
+    std::string command = "osascript -e \"";
+    command += script;
+    command += "\"";
+
+    std::array<char, 512> buffer{};
+    std::string result;
+    std::unique_ptr<FILE, decltype(&pclose)> pipe(popen(command.c_str(), "r"), pclose);
+    if (!pipe)
+        return std::nullopt;
+
+    while (fgets(buffer.data(), static_cast<int>(buffer.size()), pipe.get())) {
+        result.append(buffer.data());
+    }
+    const int exit_code = pclose(pipe.release());
+    if (exit_code != 0 || result.empty())
+        return std::nullopt;
+
+    while (!result.empty() && (result.back() == '\n' || result.back() == '\r')) {
+        result.pop_back();
+    }
+    return result.empty() ? std::nullopt : std::optional<std::string>(result);
+}
+
+std::vector<std::string> extract_extensions(const std::vector<std::string>& patterns) {
+    std::vector<std::string> extensions;
+    for (const std::string& pattern : patterns) {
+        if (pattern.size() > 2 && pattern[0] == '*' && pattern[1] == '.') {
+            std::string ext = pattern.substr(2);
+            if (ext.find_first_of("*?") == std::string::npos) {
+                extensions.push_back(ext);
+            }
+        }
+    }
+    return extensions;
+}
+
+std::optional<std::string> show_cocoa_dialog(bool save_mode, const char* title, const char* filter) {
+    const std::vector<std::string> patterns = extract_filter_patterns(filter);
+    const std::vector<std::string> extensions = extract_extensions(patterns);
+
+    std::string script;
+    if (save_mode) {
+        script = "set chosenFile to choose file name";
+    } else {
+        script = "set chosenFile to choose file";
+    }
+    if (title && *title) {
+        script += " with prompt \"" + escape_applescript(title) + "\"";
+    }
+    if (!extensions.empty()) {
+        script += " of type {";
+        for (size_t i = 0; i < extensions.size(); ++i) {
+            if (i != 0) {
+                script += ", ";
+            }
+            script += "\"" + extensions[i] + "\"";
+        }
+        script += "}";
+    }
+    script += "\nPOSIX path of chosenFile";
+
+    return run_applescript(script);
+}
+
+#else  // __APPLE__
+
+bool command_exists(const char* command) {
+    std::string check = "command -v ";
+    check += command;
+    check += " >/dev/null 2>&1";
+    const int rc = std::system(check.c_str());
+    return rc == 0;
+}
+
+std::optional<std::string> run_command_capture(const std::string& command) {
+    std::array<char, 512> buffer{};
+    std::string result;
+    std::unique_ptr<FILE, decltype(&pclose)> pipe(popen(command.c_str(), "r"), pclose);
+    if (!pipe)
+        return std::nullopt;
+
+    while (fgets(buffer.data(), static_cast<int>(buffer.size()), pipe.get())) {
+        result.append(buffer.data());
+    }
+    const int exit_code = pclose(pipe.release());
+    if (exit_code != 0 || result.empty())
+        return std::nullopt;
+
+    while (!result.empty() && (result.back() == '\n' || result.back() == '\r')) {
+        result.pop_back();
+    }
+    return result.empty() ? std::nullopt : std::optional<std::string>(result);
+}
+
+std::string escape_shell(const char* text) {
+    std::string escaped = "\"";
+    for (const char* p = text; *p; ++p) {
+        if (*p == '"' || *p == '\\' || *p == '$' || *p == '`') {
+            escaped.push_back('\\');
+        }
+        escaped.push_back(*p);
+    }
+    escaped.push_back('"');
+    return escaped;
+}
+
+std::optional<std::string> show_zenity_dialog(bool save_mode, const char* title, const char* filter) {
+    if (!command_exists("zenity"))
+        return std::nullopt;
+
+    const std::vector<std::string> patterns = extract_filter_patterns(filter);
+    std::string command = "zenity --file-selection";
+    if (save_mode) {
+        command += " --save";
+    }
+    if (title && *title) {
+        command += " --title=" + escape_shell(title);
+    }
+    if (!patterns.empty()) {
+        command += " --file-filter=\"Files |";
+        for (const std::string& pattern : patterns) {
+            command.push_back(' ');
+            command += pattern;
+        }
+        command += "\"";
+    }
+
+    return run_command_capture(command);
+}
+
+std::optional<std::string> show_kdialog_dialog(bool save_mode, const char* title, const char* filter) {
+    if (!command_exists("kdialog"))
+        return std::nullopt;
+
+    const std::vector<std::string> patterns = extract_filter_patterns(filter);
+    std::string command = "kdialog ";
+    command += save_mode ? "--getsavefilename " : "--getopenfilename ";
+    command += "\"\"";
+
+    if (!patterns.empty()) {
+        command += " \"";
+        for (size_t i = 0; i < patterns.size(); ++i) {
+            if (i != 0) {
+                command.push_back(' ');
+            }
+            command += patterns[i];
+        }
+        command += "\"";
+    }
+    if (title && *title) {
+        command += " --title ";
+        command += escape_shell(title);
+    }
+
+    return run_command_capture(command);
+}
+
+#endif  // __APPLE__
+
+std::optional<std::string> run_dialog(bool save_mode, const char* title, const char* filter) {
+#if defined(__APPLE__)
+    return show_cocoa_dialog(save_mode, title, filter);
+#else
+    if (auto zenity = show_zenity_dialog(save_mode, title, filter)) {
+        return zenity;
+    }
+    if (auto kdialog = show_kdialog_dialog(save_mode, title, filter)) {
+        return kdialog;
+    }
     return std::nullopt;
+#endif
+}
+
+}  // namespace
+
+namespace platform::dialog {
+
+std::optional<std::string> open_file(const char* title, const char* filter) {
+    return run_dialog(false, title, filter);
+}
+
+std::optional<std::string> save_file(const char* title, const char* filter) {
+    return run_dialog(true, title, filter);
 }
 
 }  // namespace platform::dialog

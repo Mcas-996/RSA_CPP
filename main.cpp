@@ -197,7 +197,6 @@ void ShowPemKeyManagementWindow() {
     ImGui::TextUnformatted("Key files");
 
     ImGui::InputText("Public key path", &state.publicKeyPath);
-#ifdef _WIN32
     ImGui::SameLine();
     if (ImGui::Button("Open...##OpenPubKeyPath")) {
         if (auto p = platform::dialog::open_file("Select public key file", "PEM Files (*.pem)|*.pem|All Files (*.*)|*.*")) {
@@ -210,7 +209,6 @@ void ShowPemKeyManagementWindow() {
             state.publicKeyPath = *p;
         }
     }
-#endif
     if (ImGui::Button("Load public key from file")) {
         std::string error;
         if (loadTextFile(state.publicKeyPath, state.publicKeyPem, error)) {
@@ -231,7 +229,6 @@ void ShowPemKeyManagementWindow() {
     }
 
     ImGui::InputText("Private key path", &state.privateKeyPath);
-#ifdef _WIN32
     ImGui::SameLine();
     if (ImGui::Button("Open...##OpenPrivKeyPath")) {
         if (auto p = platform::dialog::open_file("Select private key file", "PEM Files (*.pem)|*.pem|All Files (*.*)|*.*")) {
@@ -244,7 +241,6 @@ void ShowPemKeyManagementWindow() {
             state.privateKeyPath = *p;
         }
     }
-#endif
     if (ImGui::Button("Load private key from file")) {
         std::string error;
         if (loadTextFile(state.privateKeyPath, state.privateKeyPem, error)) {
@@ -362,23 +358,19 @@ void ShowPemFileEncryptionWindow() {
     ImGui::Combo("Padding##PemFileEncrypt", &state.paddingIndex, kPaddingLabels, IM_ARRAYSIZE(kPaddingLabels));
 
     ImGui::InputText("Input file path", &state.encryptInputPath);
-#ifdef _WIN32
     ImGui::SameLine();
     if (ImGui::Button("Browse...##PemEncInput")) {
         if (auto p = platform::dialog::open_file("Select file to encrypt", "All Files (*.*)|*.*")) {
             state.encryptInputPath = *p;
         }
     }
-#endif
     ImGui::InputText("Output Base64 path", &state.encryptOutputPath);
-#ifdef _WIN32
     ImGui::SameLine();
     if (ImGui::Button("Browse...##PemEncOutput")) {
         if (auto p = platform::dialog::save_file("Select Base64 output path", "Text Files (*.txt)|*.txt|All Files (*.*)|*.*")) {
             state.encryptOutputPath = *p;
         }
     }
-#endif
 
     if (ImGui::Button("Encrypt file")) {
         if (!state.hasPublicKey) {
@@ -440,23 +432,19 @@ void ShowPemFileDecryptionWindow() {
     ImGui::Combo("Padding##PemFileDecrypt", &state.paddingIndex, kPaddingLabels, IM_ARRAYSIZE(kPaddingLabels));
 
     ImGui::InputText("Base64 input path", &state.decryptInputPath);
-#ifdef _WIN32
     ImGui::SameLine();
     if (ImGui::Button("Browse...##PemDecInput")) {
         if (auto p = platform::dialog::open_file("Select Base64 ciphertext file", "Text Files (*.txt)|*.txt|All Files (*.*)|*.*")) {
             state.decryptInputPath = *p;
         }
     }
-#endif
     ImGui::InputText("Plaintext output path", &state.decryptOutputPath);
-#ifdef _WIN32
     ImGui::SameLine();
     if (ImGui::Button("Browse...##PemDecOutput")) {
         if (auto p = platform::dialog::save_file("Select plaintext output path", "All Files (*.*)|*.*")) {
             state.decryptOutputPath = *p;
         }
     }
-#endif
 
     if (ImGui::Button("Decrypt file")) {
         if (!state.hasPrivateKey) {
