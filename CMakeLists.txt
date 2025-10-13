@@ -35,6 +35,7 @@ target_include_directories(platform_dialog PUBLIC
 
 if(WIN32)
     target_link_libraries(platform_dialog PUBLIC Comdlg32)
+    target_compile_definitions(platform_dialog PUBLIC UNICODE _UNICODE)
 endif()
 
 add_executable(RSA_CPP
@@ -106,6 +107,7 @@ target_include_directories(RSA_CPP PRIVATE
 target_link_libraries(RSA_CPP PRIVATE platform_dialog)
 
 if(WIN32)
+    target_compile_definitions(RSA_CPP PRIVATE UNICODE _UNICODE)
     target_link_libraries(RSA_CPP PRIVATE
         d3d11
         dxgi

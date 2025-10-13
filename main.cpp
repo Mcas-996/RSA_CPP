@@ -5,6 +5,7 @@
 #include "file_dialog.hpp"
 
 #include <algorithm>
+#include <array>
 #include <cfloat>
 #include <cstdlib>
 #include <fstream>
@@ -13,6 +14,7 @@
 #include <string>
 #include <vector>
 #include <filesystem>
+#include <system_error>
 
 #include "misc/cpp/imgui_stdlib.h"
 
@@ -162,9 +164,7 @@ PemUiState& GetPemUiState() {
     return state;
 }
 
-void ShowPemKeyManagementWindow() {
-    PemUiState& state = GetPemUiState();
-    ImGui::Begin("OpenSSL PEM - Keys");
+static void DrawPemKeyManagementTab(PemUiState& state) {
     ImGui::TextUnformatted("Manage PEM key pairs for OpenSSL RSA operations");
 
     int keyBitsInput = state.keyBits;
@@ -269,13 +269,9 @@ void ShowPemKeyManagementWindow() {
     if (state.keyPair.keyBits > 0) {
         ImGui::Text("Detected key length: %d bits", state.keyPair.keyBits);
     }
-
-    ImGui::End();
 }
 
-void ShowPemEncryptionWindow() {
-    PemUiState& state = GetPemUiState();
-    ImGui::Begin("OpenSSL PEM - Encrypt");
+static void DrawPemEncryptionTab(PemUiState& state) {
     ImGui::TextUnformatted("Encrypt plaintext with the loaded public key");
 
     ImGui::Combo("Padding##PemEncrypt", &state.paddingIndex, kPaddingLabels, IM_ARRAYSIZE(kPaddingLabels));
@@ -305,13 +301,12 @@ void ShowPemEncryptionWindow() {
         ImGui::TextWrapped("Encrypt status: %s", state.encryptStatus.c_str());
     }
     ImGui::InputTextMultiline("Base64 ciphertext", &state.ciphertextBase64, ImVec2(-FLT_MIN, 120.0f));
-
-    ImGui::End();
+    if (ImGui::Button("Push ciphertext to result")) {
+        Myspace::resultPrimary = state.ciphertextBase64;
+    }
 }
 
-void ShowPemDecryptionWindow() {
-    PemUiState& state = GetPemUiState();
-    ImGui::Begin("OpenSSL PEM - Decrypt");
+static void DrawPemDecryptionTab(PemUiState& state) {
     ImGui::TextUnformatted("Decrypt Base64 ciphertext with the loaded private key");
 
     ImGui::Combo("Padding##PemDecrypt", &state.paddingIndex, kPaddingLabels, IM_ARRAYSIZE(kPaddingLabels));
@@ -346,13 +341,12 @@ void ShowPemDecryptionWindow() {
         ImGui::TextWrapped("Decrypt status: %s", state.decryptStatus.c_str());
     }
     ImGui::InputTextMultiline("Plaintext output", &state.decryptOutput, ImVec2(-FLT_MIN, 120.0f), ImGuiInputTextFlags_ReadOnly);
-
-    ImGui::End();
+    if (ImGui::Button("Push plaintext to result")) {
+        Myspace::resultPrimary = state.decryptOutput;
+    }
 }
 
-void ShowPemFileEncryptionWindow() {
-    PemUiState& state = GetPemUiState();
-    ImGui::Begin("OpenSSL PEM - Encrypt File");
+static void DrawPemFileEncryptionTab(PemUiState& state) {
     ImGui::TextWrapped("Encrypt a source file with the loaded public key and write Base64 ciphertext to disk.");
 
     ImGui::Combo("Padding##PemFileEncrypt", &state.paddingIndex, kPaddingLabels, IM_ARRAYSIZE(kPaddingLabels));
@@ -421,12 +415,8 @@ void ShowPemFileEncryptionWindow() {
     if (!state.encryptFileStatus.empty()) {
         ImGui::TextWrapped("Status: %s", state.encryptFileStatus.c_str());
     }
-
-    ImGui::End();
 }
-void ShowPemFileDecryptionWindow() {
-    PemUiState& state = GetPemUiState();
-    ImGui::Begin("OpenSSL PEM - Decrypt File");
+static void DrawPemFileDecryptionTab(PemUiState& state) {
     ImGui::TextWrapped("Decode a Base64 ciphertext file with the loaded private key and save the decrypted bytes.");
 
     ImGui::Combo("Padding##PemFileDecrypt", &state.paddingIndex, kPaddingLabels, IM_ARRAYSIZE(kPaddingLabels));
@@ -500,6 +490,38 @@ void ShowPemFileDecryptionWindow() {
     if (!state.decryptFileStatus.empty()) {
         ImGui::TextWrapped("Status: %s", state.decryptFileStatus.c_str());
     }
+}
+
+void ShowOpenSslPemWindow() {
+    PemUiState& state = GetPemUiState();
+    if (!ImGui::Begin("OpenSSL PEM")) {
+        ImGui::End();
+        return;
+    }
+
+    if (ImGui::BeginTabBar("OpenSslPemTabs")) {
+        if (ImGui::BeginTabItem("Keys")) {
+            DrawPemKeyManagementTab(state);
+            ImGui::EndTabItem();
+        }
+        if (ImGui::BeginTabItem("Encrypt")) {
+            DrawPemEncryptionTab(state);
+            ImGui::EndTabItem();
+        }
+        if (ImGui::BeginTabItem("Decrypt")) {
+            DrawPemDecryptionTab(state);
+            ImGui::EndTabItem();
+        }
+        if (ImGui::BeginTabItem("Encrypt File")) {
+            DrawPemFileEncryptionTab(state);
+            ImGui::EndTabItem();
+        }
+        if (ImGui::BeginTabItem("Decrypt File")) {
+            DrawPemFileDecryptionTab(state);
+            ImGui::EndTabItem();
+        }
+        ImGui::EndTabBar();
+    }
 
     ImGui::End();
 }
@@ -516,6 +538,128 @@ static void EnsureDefaultImGuiIni(ImGuiIO& io) {
     }
 }
 
+static ImFont* LoadFontFromFile(const std::filesystem::path& path, float size_pixels, const ImWchar* glyph_ranges, ImFontConfig& base_cfg) {
+    std::error_code ec;
+    if (path.empty()) {
+        std::cout << "ImGui: skip empty font path\n";
+        return nullptr;
+    }
+    const bool exists = std::filesystem::exists(path, ec);
+    if (!exists) {
+        std::cout << "ImGui: font not found -> " << path.u8string() << '\n';
+        if (ec) {
+            std::cout << "ImGui: exists() error code " << ec.message() << '\n';
+        }
+        return nullptr;
+    }
+
+    ImGuiIO& io = ImGui::GetIO();
+    ImFontConfig cfg = base_cfg;
+
+    const std::string extension = path.extension().string();
+    if (extension == ".ttc" || extension == ".TTC") {
+        cfg.FontNo = 0; // load first face in collections
+    }
+
+    ImFont* font = io.Fonts->AddFontFromFileTTF(path.string().c_str(), size_pixels, &cfg, glyph_ranges);
+    if (!font)
+        return nullptr;
+
+    std::cout << "ImGui: loaded font " << path.u8string() << '\n';
+    return font;
+}
+
+static void ConfigureFonts() {
+    ImGuiIO& io = ImGui::GetIO();
+    io.Fonts->Clear();
+
+    constexpr float kFontSizePx = 18.0f;
+    const ImWchar* glyph_ranges = io.Fonts->GetGlyphRangesChineseSimplifiedCommon();
+
+    ImFontConfig font_config;
+    font_config.SizePixels = kFontSizePx;
+    font_config.OversampleH = 2;
+    font_config.OversampleV = 1;
+    font_config.PixelSnapH = false;
+
+    ImFont* loaded_font = nullptr;
+
+    if (const char* env_font = std::getenv("RSA_CPP_FONT_PATH"); !loaded_font && env_font && *env_font) {
+        loaded_font = LoadFontFromFile(std::filesystem::path(env_font), kFontSizePx, glyph_ranges, font_config);
+    }
+
+#if defined(_WIN32)
+    const std::array<std::filesystem::path, 10> system_candidates = {
+        std::filesystem::path("C:/Windows/Fonts/msyh.ttc"),
+        std::filesystem::path("C:/Windows/Fonts/msyh.ttf"),
+        std::filesystem::path("C:/Windows/Fonts/msyhl.ttc"),
+        std::filesystem::path("C:/Windows/Fonts/simhei.ttf"),
+        std::filesystem::path("C:/Windows/Fonts/simhei.ttc"),
+        std::filesystem::path("C:/Windows/Fonts/simsun.ttc"),
+        std::filesystem::path("C:/Windows/Fonts/msmincho.ttc"),
+        std::filesystem::path("C:/Windows/Fonts/Deng.ttf"),
+        std::filesystem::path("C:/Windows/Fonts/mingliu.ttc"),
+        std::filesystem::path("C:/Windows/Fonts/FZSTK.TTF")
+    };
+#elif defined(__APPLE__)
+    const std::array<std::filesystem::path, 6> system_candidates = {
+        std::filesystem::path("/System/Library/Fonts/PingFang.ttc"),
+        std::filesystem::path("/System/Library/Fonts/Hiragino Sans GB W3.ttc"),
+        std::filesystem::path("/System/Library/Fonts/Songti.ttc"),
+        std::filesystem::path("/Library/Fonts/SourceHanSansSC-Regular.otf"),
+        std::filesystem::path("/Library/Fonts/ArialUnicode.ttf"),
+        std::filesystem::path("/Library/Fonts/华文黑体.ttf")
+    };
+#else
+    const std::array<std::filesystem::path, 8> system_candidates = {
+        std::filesystem::path("/usr/share/fonts/opentype/noto/NotoSansCJK-Regular.ttc"),
+        std::filesystem::path("/usr/share/fonts/opentype/noto/NotoSansSC-Regular.otf"),
+        std::filesystem::path("/usr/share/fonts/truetype/noto/NotoSansCJK-Regular.ttc"),
+        std::filesystem::path("/usr/share/fonts/truetype/noto/NotoSansSC-Regular.otf"),
+        std::filesystem::path("/usr/share/fonts/opentype/wqy/wqy-zenhei.ttc"),
+        std::filesystem::path("/usr/share/fonts/truetype/arphic/ukai.ttc"),
+        std::filesystem::path("/usr/share/fonts/truetype/arphic/uming.ttc"),
+        std::filesystem::path("/usr/share/fonts/truetype/droid/DroidSansFallbackFull.ttf")
+    };
+#endif
+
+    // Look for bundled fonts (relative to executable/workdir) first.
+    if (!loaded_font) {
+        const std::array<std::filesystem::path, 3> bundled_candidates = {
+            std::filesystem::path("fonts/NotoSansSC-Regular.otf"),
+            std::filesystem::path("fonts/SourceHanSansSC-Regular.otf"),
+            std::filesystem::path("fonts/SourceHanSansCN-Regular.otf")
+        };
+        for (const auto& candidate : bundled_candidates) {
+            loaded_font = LoadFontFromFile(candidate, kFontSizePx, glyph_ranges, font_config);
+            if (loaded_font) {
+                break;
+            }
+        }
+    }
+
+    if (!loaded_font) {
+        for (const auto& candidate : system_candidates) {
+            loaded_font = LoadFontFromFile(candidate, kFontSizePx, glyph_ranges, font_config);
+            if (loaded_font) {
+                break;
+            }
+        }
+    }
+
+    if (!loaded_font) {
+        std::cout << "ImGui: falling back to default font; no CJK font found.\n";
+        loaded_font = io.Fonts->AddFontDefault();
+    }
+
+    // Ensure there is an ASCII fallback font for symbols ImGui might use.
+    if (loaded_font != io.Fonts->Fonts.front()) {
+        io.Fonts->AddFontDefault();
+    }
+
+    io.FontDefault = loaded_font;
+}
+
 int main() {
     //std::cout << "Application starting..." << std::endl;
 
@@ -530,6 +674,7 @@ int main() {
 
     // 2. Initialize ImGui
     IMGUI_CHECKVERSION(); ImGui::CreateContext(); ImGui::StyleColorsDark();
+    ConfigureFonts();
     EnsureDefaultImGuiIni(ImGui::GetIO());
 
 #if defined(_WIN32)
@@ -599,13 +744,7 @@ int main() {
             ImGui::EndMainMenuBar();
         }
 
-        ImGui::ShowDemoWindow();
-        Myspace::TraditionalRSAWindow();
-        ShowPemKeyManagementWindow();
-        ShowPemEncryptionWindow();
-        ShowPemDecryptionWindow();
-        ShowPemFileEncryptionWindow();
-        ShowPemFileDecryptionWindow();
+        ShowOpenSslPemWindow();
         Myspace::GlobalResultWindow();
 
         Render();
