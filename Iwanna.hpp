@@ -16,6 +16,7 @@
 #include <iterator>
 #include <stdexcept>
 #include <iostream>
+#include "file_dialog.hpp"
 //namespace Myspace {
 //	void mywindow() {
 //		using namespace ImGui;
@@ -510,7 +511,23 @@ namespace Myspace {
         }
 
         InputText("Binary file path", convert_path, IM_ARRAYSIZE(convert_path));
+#ifdef _WIN32
+        SameLine();
+        if (Button("Browse##BinaryPathDialog")) {
+            if (auto selected = platform::dialog::open_file("Select source file", "All Files (*.*)|*.*")) {
+                std::snprintf(convert_path, IM_ARRAYSIZE(convert_path), "%s", selected->c_str());
+            }
+        }
+#endif
         InputText("Target file path", dest_path, IM_ARRAYSIZE(dest_path));
+#ifdef _WIN32
+        SameLine();
+        if (Button("Browse##TargetPathDialog")) {
+            if (auto selected = platform::dialog::save_file("Select destination path", "All Files (*.*)|*.*")) {
+                std::snprintf(dest_path, IM_ARRAYSIZE(dest_path), "%s", selected->c_str());
+            }
+        }
+#endif
         static bool enableWrap = true;
         Checkbox("Auto-wrap buffer", &enableWrap);
         ImGuiInputTextFlags bufferFlags = enableWrap ? ImGuiInputTextFlags_CallbackAlways : ImGuiInputTextFlags_None;

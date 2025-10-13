@@ -25,6 +25,18 @@ else()
     set(CPPCODEC_INCLUDE_DIR "${CPPCODEC_SOURCE_DIR}")
 endif()
 
+add_library(platform_dialog STATIC
+    file_dialog.cpp
+)
+
+target_include_directories(platform_dialog PUBLIC
+    ${CMAKE_SOURCE_DIR}
+)
+
+if(WIN32)
+    target_link_libraries(platform_dialog PUBLIC Comdlg32)
+endif()
+
 add_executable(RSA_CPP
     main.cpp
     prepare.cpp
@@ -90,6 +102,8 @@ target_include_directories(RSA_CPP PRIVATE
     ${glfw3_INCLUDE_DIRS}
     ${OPENSSL_INCLUDE_DIR}
 )
+
+target_link_libraries(RSA_CPP PRIVATE platform_dialog)
 
 if(WIN32)
     target_link_libraries(RSA_CPP PRIVATE
