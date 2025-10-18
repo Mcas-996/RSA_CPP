@@ -157,8 +157,6 @@ std::vector<std::string> extract_filter_patterns(const char* filter) {
     return patterns;
 }
 
-}  // namespace
-
 #if defined(__APPLE__)
 
 std::string escape_applescript(const std::string& input) {
