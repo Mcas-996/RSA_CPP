@@ -61,13 +61,22 @@ cmake -G Ninja -B build -S . -DCMAKE_BUILD_TYPE=Release
 cmake --build build
 ```
 
-### macOS（Homebrew）
+### macOS（自动脚本）
+```
+chmod +x scripts/build_mac.sh
+./scripts/build_mac.sh
+```
+
+脚本会自动下载并编译 OpenSSL 3.3.1 与 GLFW 3.4，安装到 `build/deps` 目录，然后在 `build/mac` 中运行 CMake 配置与构建。运行前请确认系统已安装 Xcode Command Line Tools（执行 `xcode-select --install`），并可访问外网。如需重新编译依赖，删除对应的 `build/deps/install` 子目录即可。
+
+### macOS（Homebrew 手动环境）
 ```
 brew update
 brew install cmake ninja glfw openssl@3
 cmake -G Ninja -B build -S . -DCMAKE_BUILD_TYPE=Release -DOPENSSL_ROOT_DIR=$(brew --prefix openssl@3)
 cmake --build build
 ```
+
 
 ### 构建产物
 - `build/RSA_CPP`（Windows 下为 `RSA_CPP.exe`）：GUI 程序

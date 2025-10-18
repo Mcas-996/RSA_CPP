@@ -69,7 +69,15 @@ cmake -G Ninja -B build -S . -DCMAKE_BUILD_TYPE=Release
 cmake --build build
 ```
 
-### macOS (Homebrew)
+### macOS (Automatic Script)
+```
+chmod +x scripts/build_mac.sh
+./scripts/build_mac.sh
+```
+
+The script downloads and builds OpenSSL 3.3.1 and GLFW 3.4 into `build/deps`, then configures and compiles the project in `build/mac`. Make sure the Xcode Command Line Tools are installed (`xcode-select --install`) before running it.
+
+### macOS (manual Homebrew toolchain)
 ```
 brew update
 brew install cmake ninja glfw openssl@3
