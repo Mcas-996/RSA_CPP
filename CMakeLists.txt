@@ -41,6 +41,7 @@ endif()
 
 add_library(platform_dialog STATIC
     file_dialog.cpp
+    file_dialog_detail.cpp
 )
 
 target_include_directories(platform_dialog PUBLIC
