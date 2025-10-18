@@ -1,4 +1,5 @@
 #include "file_dialog.hpp"
+#include "file_dialog_detail.hpp"
 
 #include <optional>
 #include <string>
@@ -156,6 +157,84 @@ std::vector<std::string> extract_filter_patterns(const char* filter) {
     return patterns;
 }
 
+std::string escape_shell(const char* text) {
+    std::string escaped = "\"";
+    if (text) {
+        for (const char* p = text; *p; ++p) {
+            if (*p == '"' || *p == '\\' || *p == '$' || *p == '`') {
+                escaped.push_back('\\');
+            }
+            escaped.push_back(*p);
+        }
+    }
+    escaped.push_back('"');
+    return escaped;
+}
+
+}  // namespace
+
+namespace platform::dialog::detail {
+
+std::string build_command_exists_check(const char* command) {
+    std::string check = "command -v ";
+    check += command ? command : "";
+    check += " >/dev/null 2>&1";
+    return check;
+}
+
+std::string build_applescript_command(const std::string& script) {
+    std::string command = "osascript -e \"";
+    command += script;
+    command += "\"";
+    return command;
+}
+
+std::string build_zenity_command(bool save_mode, const char* title, const std::vector<std::string>& patterns) {
+    std::string command = "zenity --file-selection";
+    if (save_mode) {
+        command += " --save";
+    }
+    if (title && *title) {
+        command += " --title=";
+        command += escape_shell(title);
+    }
+    if (!patterns.empty()) {
+        command += " --file-filter=\"Files |";
+        for (const std::string& pattern : patterns) {
+            command.push_back(' ');
+            command += pattern;
+        }
+        command += "\"";
+    }
+    return command;
+}
+
+std::string build_kdialog_command(bool save_mode, const char* title, const std::vector<std::string>& patterns) {
+    std::string command = "kdialog ";
+    command += save_mode ? "--getsavefilename " : "--getopenfilename ";
+    command += "\"\"";
+
+    if (!patterns.empty()) {
+        command += " \"";
+        for (size_t i = 0; i < patterns.size(); ++i) {
+            if (i != 0) {
+                command.push_back(' ');
+            }
+            command += patterns[i];
+        }
+        command += "\"";
+    }
+    if (title && *title) {
+        command += " --title ";
+        command += escape_shell(title);
+    }
+    return command;
+}
+
+}  // namespace platform::dialog::detail
+
+namespace {
+
 #if defined(__APPLE__)
 
 std::string escape_applescript(const std::string& input) {
@@ -173,9 +252,7 @@ std::string escape_applescript(const std::string& input) {
 }
 
 std::optional<std::string> run_applescript(const std::string& script) {
-    std::string command = "osascript -e \"";
-    command += script;
-    command += "\"";
+    const std::string command = platform::dialog::detail::build_applescript_command(script);
 
     std::array<char, 512> buffer{};
     std::string result;
@@ -240,9 +317,7 @@ std::optional<std::string> show_cocoa_dialog(bool save_mode, const char* title, 
 #else  // __APPLE__
 
 bool command_exists(const char* command) {
-    std::string check = "command -v ";
-    check += command;
-    check += " >/dev/null 2>&1";
+    const std::string check = platform::dialog::detail::build_command_exists_check(command);
     const int rc = std::system(check.c_str());
     return rc == 0;
 }
@@ -267,38 +342,12 @@ std::optional<std::string> run_command_capture(const std::string& command) {
     return result.empty() ? std::nullopt : std::optional<std::string>(result);
 }
 
-std::string escape_shell(const char* text) {
-    std::string escaped = "\"";
-    for (const char* p = text; *p; ++p) {
-        if (*p == '"' || *p == '\\' || *p == '$' || *p == '`') {
-            escaped.push_back('\\');
-        }
-        escaped.push_back(*p);
-    }
-    escaped.push_back('"');
-    return escaped;
-}
-
 std::optional<std::string> show_zenity_dialog(bool save_mode, const char* title, const char* filter) {
     if (!command_exists("zenity"))
         return std::nullopt;
 
     const std::vector<std::string> patterns = extract_filter_patterns(filter);
-    std::string command = "zenity --file-selection";
-    if (save_mode) {
-        command += " --save";
-    }
-    if (title && *title) {
-        command += " --title=" + escape_shell(title);
-    }
-    if (!patterns.empty()) {
-        command += " --file-filter=\"Files |";
-        for (const std::string& pattern : patterns) {
-            command.push_back(' ');
-            command += pattern;
-        }
-        command += "\"";
-    }
+    const std::string command = platform::dialog::detail::build_zenity_command(save_mode, title, patterns);
 
     return run_command_capture(command);
 }
@@ -308,24 +357,7 @@ std::optional<std::string> show_kdialog_dialog(bool save_mode, const char* title
         return std::nullopt;
 
     const std::vector<std::string> patterns = extract_filter_patterns(filter);
-    std::string command = "kdialog ";
-    command += save_mode ? "--getsavefilename " : "--getopenfilename ";
-    command += "\"\"";
-
-    if (!patterns.empty()) {
-        command += " \"";
-        for (size_t i = 0; i < patterns.size(); ++i) {
-            if (i != 0) {
-                command.push_back(' ');
-            }
-            command += patterns[i];
-        }
-        command += "\"";
-    }
-    if (title && *title) {
-        command += " --title ";
-        command += escape_shell(title);
-    }
+    const std::string command = platform::dialog::detail::build_kdialog_command(save_mode, title, patterns);
 
     return run_command_capture(command);
 }

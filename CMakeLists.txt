@@ -6,6 +6,7 @@ set(CMAKE_CXX_STANDARD_REQUIRED ON)
 set(CMAKE_CXX_EXTENSIONS OFF)
 
 include(FetchContent)
+include(CTest)
 
 set(CPPCODEC_SOURCE_DIR "${CMAKE_SOURCE_DIR}/third_party/cppcodec")
 if(EXISTS "${CPPCODEC_SOURCE_DIR}/cppcodec/base64_rfc4648.hpp")
@@ -23,6 +24,19 @@ else()
         FetchContent_Populate(cppcodec)
     endif()
     set(CPPCODEC_INCLUDE_DIR "${CPPCODEC_SOURCE_DIR}")
+endif()
+
+if(BUILD_TESTING)
+    add_executable(terminal_command_tests
+        tests/test_terminal_commands.cpp
+    )
+
+    target_link_libraries(terminal_command_tests PRIVATE platform_dialog)
+    target_include_directories(terminal_command_tests PRIVATE
+        ${CMAKE_SOURCE_DIR}
+    )
+
+    add_test(NAME terminal_command_tests COMMAND terminal_command_tests)
 endif()
 
 add_library(platform_dialog STATIC
