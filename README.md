@@ -98,8 +98,22 @@ After launching the GUI, you will see:
 
 ### CLI Version
 
-After launching the CLI version, you can use the following options:
+#### One-shot workflow example
+```bash
+# 1. Generate a PEM key pair (length <512 will be rounded up)
+./RSA_CLI -generate_key -length=256 -public_key_path="pub.pem" -private_key_path="priv.pem"
 
+# 2. Encrypt UTF-8 text with the public key
+./RSA_CLI -enscrypt -type=text -input="你好" -public_key_path="pub.pem"
+# -> prints Base64 ciphertext
+
+# 3. Decrypt the Base64 back to plaintext with the private key
+./RSA_CLI -descrypt -type=text -input="lHohV2vTLMsRdEIJ3v8G8KqnkD83ZzeKUwKa+GshZcFhxxG++TmhRCuzmhQJuk4EFbcTYgZDWBLLLmLXoTq4lw==" -private_key_path="priv.pem"
+# -> outputs 你好
+```
+
+> Note: `-input_path`, `-public_key_path`, and `-private_key_path` accept Windows/macOS/Linux style paths.
+> Requested lengths below 512 bits are automatically rounded up to 512.
 ```
 RSA Encryption/Decryption CLI Tool
 ===================================
@@ -276,9 +290,4 @@ Mcas-996
    Enter target file path: ./data/copy.bin
    String saved to file: "./data/copy.bin"
    ```
-
-
-
-
-
 

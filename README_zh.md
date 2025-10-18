@@ -84,6 +84,22 @@ cmake --build build
 工作流会自动安装依赖、确保 `third_party/cppcodec` 可用、执行 CMake 配置/编译与 `ctest`，并将生成的可执行文件打包为 `RSA_CPP-<os>-<compiler>` 形式的构建产物。可在任意一次成功运行的 GitHub Actions 记录中，通过页面右上角的 **Artifacts** 面板下载对应平台的二进制文件。
 
 ## CLI 使用说明
+#### 一次性命令示例
+```bash
+# 1. 生成 PEM 密钥（小于 512 会自动提升到 512）
+./RSA_CLI -generate_key -length=256 -public_key_path="pub.pem" -private_key_path="priv.pem"
+
+# 2. 使用 PEM 公钥加密 UTF-8 文本
+./RSA_CLI -enscrypt -type=text -input="你好" -public_key_path="pub.pem"
+# -> 输出 Base64 密文
+
+# 3. 使用 PEM 私钥解密，恢复为原始文本
+./RSA_CLI -descrypt -type=text -input="lHohV2vTLMsRdEIJ3v8G8KqnkD83ZzeKUwKa+GshZcFhxxG++TmhRCuzmhQJuk4EFbcTYgZDWBLLLmLXoTq4lw==" -private_key_path="priv.pem"
+# -> 输出 你好
+```
+
+> 注意：`-input_path`、`-public_key_path` 和 `-private_key_path` 支持 Windows/macOS/Linux 三种路径格式。
+> 小于 512 的密钥长度会自动提升到 512 位。
 
 启动 CLI 后会看到如下菜单：
 ```

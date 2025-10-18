@@ -114,7 +114,21 @@ string encodeBase64(const vector<uint8_t>& data) {
 }
 
 vector<uint8_t> decodeBase64(const string& text) {
-    return cppcodec::base64_rfc4648::decode(stripWhitespace(text));
+    string cleaned = stripWhitespace(text);
+    try {
+        return cppcodec::base64_rfc4648::decode(cleaned);
+    } catch (const std::exception&) {
+        const size_t mod = cleaned.size() % 4;
+        if (mod != 0) {
+            cleaned.append(4 - mod, '=');
+            try {
+                return cppcodec::base64_rfc4648::decode(cleaned);
+            } catch (const std::exception&) {
+                // fall through
+            }
+        }
+        throw;
+    }
 }
 
 string readTextFile(const std::filesystem::path& path) {
@@ -129,6 +143,8 @@ enum class Mode {
     Legacy = 0,
     Pem = 1
 };
+
+constexpr const char* kCliVersion = "RSA_CLI 1.0.0";
 
 const char* modeName(Mode mode) {
     return mode == Mode::Legacy ? "Legacy long long mode" : "PEM/OpenSSL mode";
@@ -177,7 +193,332 @@ void printSeparator() {
 
 } // namespace
 
-int main() {
+int main(int argc, char** argv) {
+    bool showHelp = false;
+    bool showVersion = false;
+    bool encryptCommand = false;
+    bool decryptCommand = false;
+    string commandType = "text";
+    string commandInput;
+    string commandInputPath;
+    string commandPublicKey;
+    string commandPublicKeyPath;
+    string commandPrivateKey;
+    string commandPrivateKeyPath;
+    bool generateKeyCommand = false;
+    string generatePrivatePath;
+    string generatePublicPath;
+    int generateKeyBits = 2048;
+
+    auto stripValue = [](string value) {
+        return stripSurroundingQuotes(trim(std::move(value)));
+    };
+
+    for (int i = 1; i < argc; ++i) {
+        string arg = argv[i];
+        if (arg == "-h" || arg == "--help") {
+            showHelp = true;
+        } else if (arg == "-v" || arg == "--version") {
+            showVersion = true;
+        } else if (arg == "-encrypt" || arg == "--encrypt" || arg == "-enscrypt") {
+            encryptCommand = true;
+        } else if (arg == "-decrypt" || arg == "--decrypt" || arg == "-descrypt") {
+            decryptCommand = true;
+        } else if (arg == "-generate_key" || arg == "--generate_key") {
+            generateKeyCommand = true;
+        } else if (arg.rfind("-type=", 0) == 0) {
+            commandType = stripValue(arg.substr(6));
+        } else if (arg == "-type") {
+            if (i + 1 >= argc) {
+                std::cerr << "Missing value after -type\n";
+                return 1;
+            }
+            commandType = stripValue(argv[++i]);
+        } else if (arg.rfind("-input=", 0) == 0) {
+            commandInput = stripValue(arg.substr(7));
+        } else if (arg == "-input") {
+            if (i + 1 >= argc) {
+                std::cerr << "Missing value after -input\n";
+                return 1;
+            }
+            commandInput = stripValue(argv[++i]);
+        } else if (arg.rfind("-input_path=", 0) == 0) {
+            commandInputPath = stripValue(arg.substr(12));
+        } else if (arg == "-input_path") {
+            if (i + 1 >= argc) {
+                std::cerr << "Missing value after -input_path\n";
+                return 1;
+            }
+            commandInputPath = stripValue(argv[++i]);
+        } else if (arg.rfind("-public_key=", 0) == 0) {
+            commandPublicKey = stripValue(arg.substr(12));
+        } else if (arg == "-public_key") {
+            if (i + 1 >= argc) {
+                std::cerr << "Missing value after -public_key\n";
+                return 1;
+            }
+            commandPublicKey = stripValue(argv[++i]);
+        } else if (arg.rfind("-private_key=", 0) == 0) {
+            commandPrivateKey = stripValue(arg.substr(13));
+        } else if (arg == "-private_key") {
+            if (i + 1 >= argc) {
+                std::cerr << "Missing value after -private_key\n";
+                return 1;
+            }
+            commandPrivateKey = stripValue(argv[++i]);
+        } else if (!generateKeyCommand && arg.rfind("-private_key_path=", 0) == 0) {
+            commandPrivateKeyPath = stripValue(arg.substr(18));
+        } else if (!generateKeyCommand && arg == "-private_key_path") {
+            if (i + 1 >= argc) {
+                std::cerr << "Missing value after -private_key_path\n";
+                return 1;
+            }
+            commandPrivateKeyPath = stripValue(argv[++i]);
+        } else if (generateKeyCommand && arg.rfind("-private_key_path=", 0) == 0) {
+            generatePrivatePath = stripValue(arg.substr(18));
+        } else if (generateKeyCommand && arg == "-private_key_path") {
+            if (i + 1 >= argc) {
+                std::cerr << "Missing value after -private_key_path\n";
+                return 1;
+            }
+            generatePrivatePath = stripValue(argv[++i]);
+        } else if (!generateKeyCommand && arg.rfind("-public_key_path=", 0) == 0) {
+            commandPublicKeyPath = stripValue(arg.substr(17));
+        } else if (!generateKeyCommand && arg == "-public_key_path") {
+            if (i + 1 >= argc) {
+                std::cerr << "Missing value after -public_key_path\n";
+                return 1;
+            }
+            commandPublicKeyPath = stripValue(argv[++i]);
+        } else if (generateKeyCommand && arg.rfind("-public_key_path=", 0) == 0) {
+            generatePublicPath = stripValue(arg.substr(17));
+        } else if (generateKeyCommand && arg == "-public_key_path") {
+            if (i + 1 >= argc) {
+                std::cerr << "Missing value after -public_key_path\n";
+                return 1;
+            }
+            generatePublicPath = stripValue(argv[++i]);
+        } else if (!generateKeyCommand && arg.rfind("-length=", 0) == 0) {
+            const string lenStr = stripValue(arg.substr(8));
+            try {
+                generateKeyBits = std::stoi(lenStr);
+            } catch (...) {
+                std::cerr << "Invalid value for -length: " << lenStr << std::endl;
+                return 1;
+            }
+        } else if (!generateKeyCommand && arg == "-length") {
+            if (i + 1 >= argc) {
+                std::cerr << "Missing value after -length\n";
+                return 1;
+            }
+            const string lenStr = stripValue(argv[++i]);
+            try {
+                generateKeyBits = std::stoi(lenStr);
+            } catch (...) {
+                std::cerr << "Invalid value for -length: " << lenStr << std::endl;
+                return 1;
+            }
+        } else if (generateKeyCommand && arg.rfind("-length=", 0) == 0) {
+            const string lenStr = stripValue(arg.substr(8));
+            try {
+                generateKeyBits = std::stoi(lenStr);
+            } catch (...) {
+                std::cerr << "Invalid value for -length: " << lenStr << std::endl;
+                return 1;
+            }
+        } else if (generateKeyCommand && arg == "-length") {
+            if (i + 1 >= argc) {
+                std::cerr << "Missing value after -length\n";
+                return 1;
+            }
+            const string lenStr = stripValue(argv[++i]);
+            try {
+                generateKeyBits = std::stoi(lenStr);
+            } catch (...) {
+                std::cerr << "Invalid value for -length: " << lenStr << std::endl;
+                return 1;
+            }
+        } else {
+            std::cerr << "Unknown argument: " << arg << std::endl;
+            return 1;
+        }
+    }
+
+    if (showHelp) {
+        std::cout << "RSA_CLI usage:\n"
+                  << "  RSA_CLI                # start interactive menu\n"
+                  << "  RSA_CLI -h|--help      # show this help message\n"
+                  << "  RSA_CLI -v|--version   # print CLI version\n"
+                  << "  RSA_CLI -encrypt -type=text -input=\"...\" -public_key=\"PEM\"\n"
+                  << "                        # one-shot text encryption (alias: -enscrypt)\n"
+                  << "     (use -input_path and -public_key_path to read from files)\n"
+                  << "  RSA_CLI -decrypt -type=text -input=\"Base64\" -private_key=\"PEM\"\n"
+                  << "                        # one-shot text decryption (alias: -descrypt)\n"
+                  << "     (use -input_path and -private_key_path to read from files)\n"
+                  << "  RSA_CLI -generate_key -length=2048 -public_key_path=pub.pem -private_key_path=priv.pem\n"
+                  << "                        # generate PEM key pair and write to paths\n"
+                  << "     (length <512 will be rounded up automatically)\n\n"
+                  << "Interactive menu options:\n"
+                  << "  1  Switch mode between legacy (integer) and PEM (OpenSSL)\n"
+                  << "  2  Generate keys in current mode\n"
+                  << "  3  Import keys from files or input\n"
+                  << "  4  Display current keys\n"
+                  << "  5  Encrypt text input\n"
+                  << "  6  Decrypt text input\n"
+                  << "  7  Save a string or result to binary file\n"
+                  << "  8  Encrypt binary file (memory -> Base64)\n"
+                  << "  9  Decrypt Base64 ciphertext to binary\n"
+                  << "  10 Load binary file into memory\n"
+                  << "  11 Save current keys to files\n"
+                  << "  12 Encrypt file to file\n"
+                  << "  13 Decrypt file to file\n"
+                  << "  14 Exit\n";
+        return 0;
+    }
+
+    if (showVersion) {
+        std::cout << kCliVersion << std::endl;
+        return 0;
+    }
+
+    if ((encryptCommand ? 1 : 0) + (decryptCommand ? 1 : 0) + (generateKeyCommand ? 1 : 0) > 1) {
+        std::cerr << "Cannot combine encrypt, decrypt, or generate commands simultaneously.\n";
+        return 1;
+    }
+
+    if (encryptCommand) {
+        if (commandType.empty()) {
+            commandType = "text";
+        }
+        if (commandType != "text") {
+            std::cerr << "Unsupported encryption type: " << commandType << std::endl;
+            return 1;
+        }
+        string plaintext = commandInput;
+        if (plaintext.empty() && !commandInputPath.empty()) {
+            try {
+                plaintext = readTextFile(std::filesystem::u8path(commandInputPath));
+            } catch (const std::exception& ex) {
+                std::cerr << "Failed to read input file: " << ex.what() << std::endl;
+                return 1;
+            }
+        }
+        if (plaintext.empty()) {
+            std::cerr << "Missing -input or -input_path value for encryption.\n";
+            return 1;
+        }
+
+        string publicKeyPem = commandPublicKey;
+        if (publicKeyPem.empty() && !commandPublicKeyPath.empty()) {
+            try {
+                publicKeyPem = readTextFile(std::filesystem::u8path(commandPublicKeyPath));
+            } catch (const std::exception& ex) {
+                std::cerr << "Failed to read public key file: " << ex.what() << std::endl;
+                return 1;
+            }
+        }
+        if (publicKeyPem.empty()) {
+            std::cerr << "Missing -public_key or -public_key_path value for encryption.\n";
+            return 1;
+        }
+
+        try {
+            RSAUtil::PemKeyPair pair{};
+            pair.publicKeyPem = publicKeyPem;
+            pair.keyBits = RSAUtil::getKeyBitsFromPublicKey(publicKeyPem);
+            const vector<uint8_t> encrypted = RSAUtil::encryptTextToBytes(plaintext, pair);
+            const string base64 = encodeBase64(encrypted);
+            std::cout << base64 << std::endl;
+            return 0;
+        } catch (const std::exception& ex) {
+            std::cerr << "Encryption failed: " << ex.what() << std::endl;
+            return 1;
+        }
+    }
+
+    if (decryptCommand) {
+        if (commandType.empty()) {
+            commandType = "text";
+        }
+        if (commandType != "text") {
+            std::cerr << "Unsupported decryption type: " << commandType << std::endl;
+            return 1;
+        }
+        string ciphertext = commandInput;
+        if (ciphertext.empty() && !commandInputPath.empty()) {
+            try {
+                ciphertext = readTextFile(std::filesystem::u8path(commandInputPath));
+            } catch (const std::exception& ex) {
+                std::cerr << "Failed to read input file: " << ex.what() << std::endl;
+                return 1;
+            }
+        }
+        if (ciphertext.empty()) {
+            std::cerr << "Missing -input or -input_path value for decryption.\n";
+            return 1;
+        }
+
+        string privateKeyPem = commandPrivateKey;
+        if (privateKeyPem.empty() && !commandPrivateKeyPath.empty()) {
+            try {
+                privateKeyPem = readTextFile(std::filesystem::u8path(commandPrivateKeyPath));
+            } catch (const std::exception& ex) {
+                std::cerr << "Failed to read private key file: " << ex.what() << std::endl;
+                return 1;
+            }
+        }
+        if (privateKeyPem.empty()) {
+            std::cerr << "Missing -private_key or -private_key_path value for decryption.\n";
+            return 1;
+        }
+
+        try {
+            const vector<uint8_t> cipherBytes = decodeBase64(ciphertext);
+            RSAUtil::PemKeyPair pair{};
+            pair.privateKeyPem = privateKeyPem;
+            const vector<uint8_t> plainBytes = RSAUtil::decryptBytes(cipherBytes, pair);
+            string plaintext(plainBytes.begin(), plainBytes.end());
+            std::cout << plaintext << std::endl;
+            return 0;
+        } catch (const std::exception& ex) {
+            std::cerr << "Decryption failed: " << ex.what() << std::endl;
+            return 1;
+        }
+    }
+
+    if (generateKeyCommand) {
+        if (generatePublicPath.empty() && generatePrivatePath.empty()) {
+            std::cerr << "Provide at least -public_key_path or -private_key_path to save generated keys.\n";
+            return 1;
+        }
+        if (generateKeyBits < 512) {
+            std::cout << "Requested key length below 512 bits; using 512.\n";
+            generateKeyBits = 512;
+        }
+        try {
+            const RSAUtil::PemKeyPair pair = RSAUtil::generatePemKeyPair(generateKeyBits);
+            const string sanitizedPublic = stripSurroundingQuotes(generatePublicPath);
+            const string sanitizedPrivate = stripSurroundingQuotes(generatePrivatePath);
+            if (!generatePublicPath.empty()) {
+                WriteStringToBinaryFile(sanitizedPublic, pair.publicKeyPem);
+            }
+            if (!generatePrivatePath.empty()) {
+                WriteStringToBinaryFile(sanitizedPrivate, pair.privateKeyPem);
+            }
+            std::cout << "Generated " << generateKeyBits << "-bit key pair.\n";
+            if (!generatePublicPath.empty()) {
+                std::cout << "Public key saved to: " << sanitizedPublic << std::endl;
+            }
+            if (!generatePrivatePath.empty()) {
+                std::cout << "Private key saved to: " << sanitizedPrivate << std::endl;
+            }
+            return 0;
+        } catch (const std::exception& ex) {
+            std::cerr << "Key generation failed: " << ex.what() << std::endl;
+            return 1;
+        }
+    }
+
     std::cout << "RSA Encryption/Decryption CLI Tool" << std::endl;
     std::cout << "===================================" << std::endl;
 
